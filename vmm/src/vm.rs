@@ -32,6 +32,7 @@ use pci::{
 };
 use qcow::{self, ImageType, QcowFile};
 use std::ffi::CString;
+use std::fs::{self, DirEntry};
 use std::fs::{File, OpenOptions};
 use std::io::{self, stdout};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -142,6 +143,21 @@ pub enum Error {
 
     /// Unexpected KVM_RUN exit reason
     VcpuUnhandledKvmExit,
+
+    /// Failed to create shared file.
+    SharedFileCreate(io::Error),
+
+    /// Failed to set shared file length.
+    SharedFileSetLen(io::Error),
+
+    /// Failed to set shared file length.
+    ReadDir(io::Error),
+
+    /// Failed to set shared file length.
+    GetEntry(io::Error),
+
+    /// Failed to set shared file length.
+    GetMetadata(io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -159,6 +175,9 @@ pub enum DeviceManagerError {
 
     /// Cannot create virtio-net device
     CreateVirtioNet(vm_virtio::net::Error),
+
+    /// Cannot create virtio-net device
+    CreateVhostUserNet(vm_virtio::vhost_user::Error),
 
     /// Cannot create virtio-rng device
     CreateVirtioRng(io::Error),
@@ -366,28 +385,51 @@ impl DeviceManager {
         }
 
         // Add virtio-net if required
-        if let Some(net_cfg) = &vm_cfg.net {
-            let mut virtio_net_device: vm_virtio::Net;
+        //if let Some(net_cfg) = &vm_cfg.net {
+        //    let mut virtio_net_device: vm_virtio::Net;
 
-            if let Some(tap_if_name) = net_cfg.tap {
-                let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
-                virtio_net_device = vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac))
-                    .map_err(DeviceManagerError::CreateVirtioNet)?;
-            } else {
-                virtio_net_device =
-                    vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac))
-                        .map_err(DeviceManagerError::CreateVirtioNet)?;
+        //    if let Some(tap_if_name) = net_cfg.tap {
+        //        let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
+        //        virtio_net_device = vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac))
+        //            .map_err(DeviceManagerError::CreateVirtioNet)?;
+        //    } else {
+        //        virtio_net_device =
+        //            vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac))
+        //                .map_err(DeviceManagerError::CreateVirtioNet)?;
+        //    }
+
+        //    DeviceManager::add_virtio_pci_device(
+        //        Box::new(virtio_net_device),
+        //        memory.clone(),
+        //        allocator,
+        //        vm_fd,
+        //        &mut pci_root,
+        //        &mut mmio_bus,
+        //        msi_capable,
+        //    )?;
+        //}
+
+        // Add vhost-user-net if required
+        if let Some(vhost_user_net_cfg) = &vm_cfg.vhost_user_net {
+            if let Some(vhost_user_net_sock) = vhost_user_net_cfg.sock.to_str() {
+                let vhost_user_net_device = vm_virtio::vhost_user::Net::new(
+                    vhost_user_net_cfg.mac,
+                    vhost_user_net_sock,
+                    vhost_user_net_cfg.num_queues,
+                    vhost_user_net_cfg.queue_size,
+                )
+                .map_err(DeviceManagerError::CreateVhostUserNet)?;
+
+                DeviceManager::add_virtio_pci_device(
+                    Box::new(vhost_user_net_device),
+                    memory.clone(),
+                    allocator,
+                    vm_fd,
+                    &mut pci_root,
+                    &mut mmio_bus,
+                    msi_capable,
+                )?;
             }
-
-            DeviceManager::add_virtio_pci_device(
-                Box::new(virtio_net_device),
-                memory.clone(),
-                allocator,
-                vm_fd,
-                &mut pci_root,
-                &mut mmio_bus,
-                msi_capable,
-            )?;
         }
 
         // Add virtio-rng if required
@@ -602,8 +644,31 @@ impl<'a> Vm<'a> {
         let fd = Arc::new(fd);
 
         // Init guest memory
-        let arch_mem_regions = arch::arch_memory_regions(u64::from(&config.memory) << 20);
+        let arch_mem_regions = arch::arch_memory_regions(config.memory.size << 20);
         let guest_memory = GuestMemoryMmap::new(&arch_mem_regions).map_err(Error::GuestMemory)?;
+
+        let guest_memory = match config.memory.file {
+            Some(file) => {
+                let mut mem_regions = Vec::<(GuestAddress, usize, File, usize)>::new();
+                if file.is_file() {
+                    for region in arch_mem_regions.iter() {
+                        let file = OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .open(file)
+                            .map_err(Error::SharedFileCreate)?;
+
+                        file.set_len(region.1 as u64)
+                            .map_err(Error::SharedFileSetLen)?;
+
+                        mem_regions.push((region.0, region.1, file, 0));
+                    }
+                } 
+                GuestMemoryMmap::new_backed_by_file(&mem_regions).map_err(Error::GuestMemory)?
+            }
+            None => GuestMemoryMmap::new(&arch_mem_regions).map_err(Error::GuestMemory)?,
+        };
+
 
         guest_memory
             .with_regions(|index, region| {

@@ -22,8 +22,10 @@ const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 pub enum Error<'a> {
     /// Failed parsing cpus parameters.
     ParseCpusParams(std::num::ParseIntError),
-    /// Failed parsing memory parameters.
-    ParseMemoryParams(std::num::ParseIntError),
+    /// Failed parsing memory size parameter.
+    ParseMemorySizeParam(std::num::ParseIntError),
+    /// Failed parsing memory file parameter.
+    ParseMemoryFileParam,
     /// Failed parsing kernel parameters.
     ParseKernelParams,
     /// Failed parsing kernel command line parameters.
@@ -38,6 +40,14 @@ pub enum Error<'a> {
     ParseNetMaskParam(AddrParseError),
     /// Failed parsing network mac parameter.
     ParseNetMacParam(&'a str),
+    /// Failed parsing vhost-user-net mac parameter.
+    ParseVuNetMacParam(&'a str),
+    /// Failed parsing vhost-user-net sock parameter.
+    ParseVuNetSockParam,
+    /// Failed parsing vhost-user-net queue number parameter.
+    ParseVuNetNumQueuesParam(std::num::ParseIntError),
+    /// Failed parsing vhost-user-net queue size parameter.
+    ParseVuNetQueueSizeParam(std::num::ParseIntError),
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -48,7 +58,8 @@ pub struct VmParams<'a> {
     pub cmdline: Option<&'a str>,
     pub disks: Vec<&'a str>,
     pub rng: &'a str,
-    pub net: Option<&'a str>,
+    //pub net: Option<&'a str>,
+    pub vhost_user_net: Option<&'a str>,
 }
 
 pub struct CpusConfig(pub u8);
@@ -67,19 +78,45 @@ impl From<&CpusConfig> for u8 {
     }
 }
 
-pub struct MemoryConfig(pub u64);
-
-impl MemoryConfig {
-    pub fn parse(memory: &str) -> Result<Self> {
-        Ok(MemoryConfig(
-            memory.parse::<u64>().map_err(Error::ParseMemoryParams)?,
-        ))
-    }
+pub struct MemoryConfig<'a> {
+    pub size: u64,
+    pub file: Option<&'a Path>,
 }
 
-impl From<&MemoryConfig> for u64 {
-    fn from(val: &MemoryConfig) -> Self {
-        val.0
+impl<'a> MemoryConfig<'a> {
+    pub fn parse(memory: &'a str) -> Result<Self> {
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = memory.split(',').collect();
+
+        let mut size_str: &str = "";
+        let mut file_str: &str = "";
+        let mut backed = false;
+
+        for param in params_list.iter() {
+            if param.starts_with("size=") {
+                size_str = &param[5..];
+            } else if param.starts_with("file=") {
+                backed = true;
+                file_str = &param[5..];
+            }
+        }
+
+        let file = if backed {
+            if file_str.is_empty() {
+                return Err(Error::ParseMemoryFileParam);
+            }
+
+            Some(Path::new(file_str))
+        } else {
+            None
+        };
+
+        Ok(MemoryConfig {
+            size: size_str
+                .parse::<u64>()
+                .map_err(Error::ParseMemorySizeParam)?,
+            file,
+        })
     }
 }
 
@@ -195,14 +232,78 @@ impl<'a> NetConfig<'a> {
     }
 }
 
+pub struct VhostUserNetConfig<'a> {
+    pub mac: MacAddr,
+    pub sock: &'a Path,
+    pub num_queues: usize,
+    pub queue_size: u16,
+}
+
+impl<'a> VhostUserNetConfig<'a> {
+    pub fn parse(vhost_user_net: Option<&'a str>) -> Result<Option<Self>> {
+        if vhost_user_net.is_none() {
+            return Ok(None);
+        }
+
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = vhost_user_net.unwrap().split(',').collect();
+
+        let mut mac_str: &str = "";
+        let mut sock: &str = "";
+        let mut num_queues_str: &str = "";
+        let mut queue_size_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("mac=") {
+                mac_str = &param[4..];
+            } else if param.starts_with("sock=") {
+                sock = &param[5..];
+            } else if param.starts_with("num_queues=") {
+                num_queues_str = &param[11..];
+            } else if param.starts_with("queue_size=") {
+                queue_size_str = &param[11..];
+            }
+        }
+
+        let mut mac: MacAddr = MacAddr::local_random();
+        let mut num_queues: usize = 2;
+        let mut queue_size: u16 = 1024;
+
+        if !mac_str.is_empty() {
+            mac = MacAddr::parse_str(mac_str).map_err(Error::ParseVuNetMacParam)?;
+        }
+        if sock.is_empty() {
+            return Err(Error::ParseVuNetSockParam);
+        }
+        if !num_queues_str.is_empty() {
+            num_queues = num_queues_str
+                .parse()
+                .map_err(Error::ParseVuNetNumQueuesParam)?;
+        }
+        if !queue_size_str.is_empty() {
+            queue_size = queue_size_str
+                .parse()
+                .map_err(Error::ParseVuNetQueueSizeParam)?;
+        }
+
+        Ok(Some(VhostUserNetConfig {
+            mac,
+            sock: Path::new(sock),
+            num_queues,
+            queue_size,
+        }))
+    }
+}
+
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
-    pub memory: MemoryConfig,
+    pub memory: MemoryConfig<'a>,
     pub kernel: KernelConfig<'a>,
     pub cmdline: CmdlineConfig,
     pub disks: Vec<DiskConfig<'a>>,
     pub rng: RngConfig<'a>,
-    pub net: Option<NetConfig<'a>>,
+    //pub net: Option<NetConfig<'a>>,
+    pub vhost_user_net: Option<VhostUserNetConfig<'a>>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -219,7 +320,8 @@ impl<'a> VmConfig<'a> {
             cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
             disks,
             rng: RngConfig::parse(vm_params.rng)?,
-            net: NetConfig::parse(vm_params.net)?,
+            //net: NetConfig::parse(vm_params.net)?,
+            vhost_user_net: VhostUserNetConfig::parse(vm_params.vhost_user_net)?,
         })
     }
 }
