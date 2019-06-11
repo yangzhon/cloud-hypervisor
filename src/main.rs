@@ -48,12 +48,22 @@ fn main() {
                 .takes_value(true)
                 .min_values(1),
         )
+        //.arg(
+        //    Arg::with_name("net")
+        //        .long("net")
+        //        .help(
+        //            "Network parameters \"tap=<if_name>,\
+        //             ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>\"",
+        //        )
+        //        .takes_value(true),
+        //)
         .arg(
-            Arg::with_name("net")
-                .long("net")
+            Arg::with_name("vunet")
+                .long("vunet")
                 .help(
-                    "Network parameters \"tap=<if_name>,\
-                     ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>\"",
+                    "Network parameters \"mac=<mac_addr>,\
+                     sock=<socket_path>, num_queues=<number_of_queues>,\
+                     queue_size=<size_of_each_queue>\"",
                 )
                 .takes_value(true),
         )
@@ -80,7 +90,9 @@ fn main() {
         .expect("Missing argument: disk. Provide at least one")
         .collect();
 
-    let net = cmd_arguments.value_of("net");
+    //let net = cmd_arguments.value_of("net");
+
+    let vhost_user_net = cmd_arguments.value_of("vunet");
 
     // This .unwrap() cannot fail as there is a default value defined
     let rng = cmd_arguments.value_of("rng").unwrap();
@@ -92,7 +104,8 @@ fn main() {
         cmdline,
         disks,
         rng,
-        net,
+        //net,
+        vhost_user_net,
     }) {
         Ok(config) => config,
         Err(e) => {
@@ -105,7 +118,7 @@ fn main() {
         "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\
          \n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
         u8::from(&vm_config.cpus),
-        u64::from(&vm_config.memory),
+        vm_config.memory.size,
         vm_config.kernel.path,
         vm_config.cmdline.args.as_str(),
         vm_config.disks,
