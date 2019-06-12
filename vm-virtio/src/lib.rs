@@ -13,11 +13,13 @@ extern crate epoll;
 #[macro_use]
 extern crate log;
 extern crate pci;
+extern crate vhost_rs;
 extern crate virtio_bindings;
 extern crate vm_memory;
 
 use std::fmt;
 use std::io;
+use vhost_rs::Error as VhostError;
 
 mod block;
 mod device;
@@ -28,6 +30,7 @@ mod queue;
 mod rng;
 
 pub mod transport;
+pub mod vhost_user;
 
 pub use self::block::*;
 pub use self::device::*;
@@ -114,9 +117,18 @@ const INTERRUPT_STATUS_CONFIG_CHANGED: u32 = 0x2;
 pub enum ActivateError {
     EpollCtl(std::io::Error),
     BadActivate,
-
+    /// Queue number is not correct
+    BadQueueNum,
+    /// Failed to clone Kill event
+    CloneKillEventFd,
+    /// Failed to create Vhost-user interrupt eventfd
+    VhostIrqCreate,
     /// Failed to setup vhost-user daemon.
     VhostUserSetup(fs::Error),
+    /// Failed to setup vhost-user daemon.
+    VhostUserNetSetup(vhost_user::Error),
+    /// Set vring enable failed.
+    VhostUserSetVringEnable(VhostError),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;
