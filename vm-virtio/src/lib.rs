@@ -27,6 +27,7 @@ mod queue;
 mod rng;
 
 pub mod transport;
+pub mod vhost_user;
 
 pub use self::block::*;
 pub use self::device::*;
@@ -88,8 +89,12 @@ const INTERRUPT_STATUS_CONFIG_CHANGED: u32 = 0x2;
 pub enum ActivateError {
     EpollCtl(std::io::Error),
     BadActivate,
-    #[cfg(feature = "vsock")]
-    BadVhostActivate(self::vhost::Error),
+    /// Queue number is not correct
+    BadQueueNum,
+    /// Failed to create Vhost-user interrupt eventfd
+    VhostIrqCreate,
+    /// Failed to clone Kill event
+    CloneKillEventFd,
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;

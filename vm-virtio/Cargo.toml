@@ -18,6 +18,11 @@ virtio-bindings = { path = "../virtio-bindings" }
 vm-allocator = { path = "../vm-allocator" }
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 
+[dependencies.vhost_rs]
+git = "https://github.com/jiangliu/vhost"
+branch = "v1"
+features = ["vhost-user-master", "vhost-kern"]
+
 [dependencies.vm-memory]
 git = "https://github.com/sboeuf/vm-memory"
 branch = "add_fd_support"
