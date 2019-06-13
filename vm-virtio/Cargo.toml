@@ -19,5 +19,6 @@ vm-allocator = { path = "../vm-allocator" }
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 
 [dependencies.vm-memory]
-git = "https://github.com/rust-vmm/vm-memory"
+git = "https://github.com/sboeuf/vm-memory"
+branch = "add_fd_support"
 features = ["backend-mmap"]
