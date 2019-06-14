@@ -10,9 +10,11 @@ use vm_memory::MmapError;
 use vhost_rs::Error as VhostError;
 
 pub mod net;
+pub mod blk;
 mod handler;
 
 pub use self::net::Net;
+pub use self::blk::Blk;
 
 #[derive(Debug)]
 pub enum Error {
