@@ -43,11 +43,11 @@ pub enum Error<'a> {
     /// Failed parsing vhost-user-net mac parameter.
     ParseVuNetMacParam(&'a str),
     /// Failed parsing vhost-user-net sock parameter.
-    ParseVuNetSockParam,
+    ParseVuSockParam,
     /// Failed parsing vhost-user-net queue number parameter.
-    ParseVuNetNumQueuesParam(std::num::ParseIntError),
+    ParseVuNumQueuesParam(std::num::ParseIntError),
     /// Failed parsing vhost-user-net queue size parameter.
-    ParseVuNetQueueSizeParam(std::num::ParseIntError),
+    ParseVuQueueSizeParam(std::num::ParseIntError),
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -60,6 +60,7 @@ pub struct VmParams<'a> {
     pub rng: &'a str,
     //pub net: Option<&'a str>,
     pub vhost_user_net: Option<&'a str>,
+    pub vhost_user_blk: Option<&'a str>,
 }
 
 pub struct CpusConfig(pub u8);
@@ -273,21 +274,84 @@ impl<'a> VhostUserNetConfig<'a> {
             mac = MacAddr::parse_str(mac_str).map_err(Error::ParseVuNetMacParam)?;
         }
         if sock.is_empty() {
-            return Err(Error::ParseVuNetSockParam);
+            return Err(Error::ParseVuSockParam);
         }
         if !num_queues_str.is_empty() {
             num_queues = num_queues_str
                 .parse()
-                .map_err(Error::ParseVuNetNumQueuesParam)?;
+                .map_err(Error::ParseVuNumQueuesParam)?;
         }
         if !queue_size_str.is_empty() {
             queue_size = queue_size_str
                 .parse()
-                .map_err(Error::ParseVuNetQueueSizeParam)?;
+                .map_err(Error::ParseVuQueueSizeParam)?;
         }
 
         Ok(Some(VhostUserNetConfig {
             mac,
+            sock: Path::new(sock),
+            num_queues,
+            queue_size,
+        }))
+    }
+}
+
+pub struct VhostUserBlkConfig<'a> {
+    pub bootindex: usize,
+    pub sock: &'a Path,
+    pub num_queues: usize,
+    pub queue_size: u16,
+}
+
+impl<'a> VhostUserBlkConfig<'a> {
+    pub fn parse(vhost_user_blk: Option<&'a str>) -> Result<Option<Self>> {
+        if vhost_user_blk.is_none() {
+            return Ok(None);
+        }
+
+        /// Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = vhost_user_blk.unwrap().split(',').collect();
+
+        let mut bootindex: &str = "";
+        let mut sock: &str = "";
+        let mut num_queues_str: &str = "";
+        let mut queue_size_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("bootindex=") {
+                bootindex_str = &param[10..];
+            } else if param.starts_with("sock=") {
+                sock = &param[5..];
+            } else if param.starts_with("num_queues=") {
+                num_queues_str = &param[11..];
+            } else if param.starts_with("queue_size=") {
+                queue_size_str = &param[11..];
+            }
+        }
+
+        let mut bootindex: usize = 0;;
+        let mut num_queues: usize = 2;
+        let mut queue_size: u16 = 128;
+
+        if !bootindex.is_empty() {
+            bootindex = bootindex_str
+                .parse()
+                .map_err(Error::ParseVuNetMacParam)?;
+        }
+
+        if !num_queues_str.is_empty() {
+            num_queues = num_queues_str
+                .parse()
+                .map_err(Error::ParseVuNumQueuesParam)?;
+        }
+        if !queue_size_str.is_empty() {
+            queue_size = queue_size_str
+                .parse()
+                .map_err(Error::ParseVuQueueSizeParam)?;
+        }
+
+        Ok(Some(VhostUserBlkConfig {
+            bootindex,
             sock: Path::new(sock),
             num_queues,
             queue_size,
@@ -304,6 +368,7 @@ pub struct VmConfig<'a> {
     pub rng: RngConfig<'a>,
     //pub net: Option<NetConfig<'a>>,
     pub vhost_user_net: Option<VhostUserNetConfig<'a>>,
+    pub vhost_user_blk: Option<VhostUserBlkConfig<'a>>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -322,6 +387,7 @@ impl<'a> VmConfig<'a> {
             rng: RngConfig::parse(vm_params.rng)?,
             //net: NetConfig::parse(vm_params.net)?,
             vhost_user_net: VhostUserNetConfig::parse(vm_params.vhost_user_net)?,
+            vhost_user_blk: VhostUserBlkConfig::parse(vm_params.vhost_user_blk)?,
         })
     }
 }
