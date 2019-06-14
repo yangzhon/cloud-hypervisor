@@ -68,6 +68,16 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("vhost-user-blk")
+                .long("vhost-user-blk")
+                .help(
+                    "Block parameters \"bootindex=<boot_index>,\
+                     sock=<socket_path>, num_queues=<number_of_queues>,\
+                     queue_size=<size_of_each_queue>\"",
+                )
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("rng")
                 .long("rng")
                 .help("Path to entropy source")
@@ -93,6 +103,7 @@ fn main() {
     //let net = cmd_arguments.value_of("net");
 
     let vhost_user_net = cmd_arguments.value_of("vunet");
+    let vhost_user_blk = cmd_arguments.value_of("vhost-user-blk");
 
     // This .unwrap() cannot fail as there is a default value defined
     let rng = cmd_arguments.value_of("rng").unwrap();
@@ -106,6 +117,7 @@ fn main() {
         rng,
         //net,
         vhost_user_net,
+        vhost_user_blk,
     }) {
         Ok(config) => config,
         Err(e) => {
