@@ -48,6 +48,8 @@ pub enum Error<'a> {
     ParseVuNumQueuesParam(std::num::ParseIntError),
     /// Failed parsing vhost-user-net queue size parameter.
     ParseVuQueueSizeParam(std::num::ParseIntError),
+    /// Failed parsing vhost-user-net config_wce parameter.
+    ParseVuConfigWceParam(std::num::ParseIntError),
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -301,6 +303,7 @@ pub struct VhostUserBlkConfig<'a> {
     pub sock: &'a Path,
     pub num_queues: usize,
     pub queue_size: u16,
+    pub config_wce: u8,
 }
 
 impl<'a> VhostUserBlkConfig<'a> {
@@ -316,6 +319,7 @@ impl<'a> VhostUserBlkConfig<'a> {
         let mut sock: &str = "";
         let mut num_queues_str: &str = "";
         let mut queue_size_str: &str = "";
+        let mut config_wce_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("bootindex=") {
@@ -326,12 +330,15 @@ impl<'a> VhostUserBlkConfig<'a> {
                 num_queues_str = &param[11..];
             } else if param.starts_with("queue_size=") {
                 queue_size_str = &param[11..];
+            } else if param.starts_with("config_wce=") {
+                config_wce_str = &param[11..];
             }
         }
 
         let mut bootindex: usize = 0;;
         let mut num_queues: usize = 2;
         let mut queue_size: u16 = 128;
+        let mut config_wce: u16 = 0;
 
         if !bootindex.is_empty() {
             bootindex = bootindex_str
@@ -349,12 +356,18 @@ impl<'a> VhostUserBlkConfig<'a> {
                 .parse()
                 .map_err(Error::ParseVuQueueSizeParam)?;
         }
+        if !config_wce_str.is_empty() {
+            queue_size = config_wce_str
+                .parse()
+                .map_err(Error::ParseVuConfigWceParam)?;
+        }
 
         Ok(Some(VhostUserBlkConfig {
             bootindex,
             sock: Path::new(sock),
             num_queues,
             queue_size,
+            config_wce,
         }))
     }
 }

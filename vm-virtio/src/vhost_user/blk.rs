@@ -41,28 +41,25 @@ pub struct Blk {
 
 impl Blk {
     /// Create a new vhost-user-blk device
-    pub fn new(bootindex: usize, path: &str, num_queues: usize, queue_size: u16) -> Result<Blk> {
+    pub fn new(bootindex: usize, path: &str, num_queues: usize, queue_size: u16, config_wce: u8) -> Result<Blk> {
         let vhost_user_blk =
             Master::connect(path, num_queues as u64).map_err(Error::VhostUserCreateMaster)?;
 
         let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?;
 
-        let mut avail_features = 1 << virtio_net::VIRTIO_NET_F_GUEST_CSUM
-            | 1 << virtio_net::VIRTIO_NET_F_CSUM
-            | 1 << virtio_net::VIRTIO_NET_F_GUEST_TSO4
-            | 1 << virtio_net::VIRTIO_NET_F_GUEST_UFO
-            | 1 << virtio_net::VIRTIO_NET_F_HOST_TSO4
-            | 1 << virtio_net::VIRTIO_NET_F_HOST_UFO
-            | 1 << virtio_net::VIRTIO_NET_F_MRG_RXBUF
-            | 1 << VIRTIO_RING_F_INDIRECT_DESC
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
-            | 1 << VIRTIO_F_VERSION_1;
+        let mut avail_features = 1 << VIRTIO_BLK_F_SIZE_MAX
+            | 1 << VIRTIO_BLK_F_SEG_MAX
+            | 1 << VIRTIO_BLK_F_TOPOLOGY
+            | 1 << VIRTIO_BLK_F_BLK_SIZE
+            | 1 << VIRTIO_BLK_F_FLUSH
+            | 1 << VIRTIO_BLK_F_CONFIG_WCE
+            | 1 << VIRTIO_F_VERSION_1
+            | 1 << VHOST_USER_F_PROTOCOL_FEATURES;
 
-        let mut config_space = Vec::with_capacity(MAC_ADDR_LEN);
-        unsafe { config_space.set_len(MAC_ADDR_LEN) }
-        config_space[..].copy_from_slice(mac_addr.get_bytes());
-        avail_features |= 1 << virtio_net::VIRTIO_NET_F_MAC;
+        /// wce is u8.
+        let mut config_space = Vec::with_capacity(1);
+        unsafe { config_space.set_len(1) }
+        config_space[..].copy_from_slice(config_wce.get_bytes());
 
         Ok(Blk {
             vhost_user_blk: vhost_user_blk,

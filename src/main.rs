@@ -73,7 +73,7 @@ fn main() {
                 .help(
                     "Block parameters \"bootindex=<boot_index>,\
                      sock=<socket_path>, num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>\"",
+                     queue_size=<size_of_each_queue>, config_wce=<value_of_wce>\"",
                 )
                 .takes_value(true),
         )

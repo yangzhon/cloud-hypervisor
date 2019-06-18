@@ -443,6 +443,7 @@ impl DeviceManager {
                     vhost_user_blk_sock,
                     vhost_user_blk_cfg.num_queues,
                     vhost_user_blk_cfg.queue_size,
+                    vhost_user_blk_cfg.config_wce,
                 )
                 .map_err(DeviceManagerError::CreateVhostUserBlk)?;
 
