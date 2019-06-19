@@ -435,11 +435,10 @@ impl DeviceManager {
             }
         }
 
-        /// Add vhost-user-blk if required
+        // Add vhost-user-blk if required
         if let Some(vhost_user_blk_cfg) = &vm_cfg.vhost_user_blk {
             if let Some(vhost_user_blk_sock) = vhost_user_blk_cfg.sock.to_str() {
                 let vhost_user_blk_device = vm_virtio::vhost_user::Blk::new(
-                    vhost_user_blk_cfg.bootindex,
                     vhost_user_blk_sock,
                     vhost_user_blk_cfg.num_queues,
                     vhost_user_blk_cfg.queue_size,

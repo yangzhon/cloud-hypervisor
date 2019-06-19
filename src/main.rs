@@ -71,9 +71,10 @@ fn main() {
             Arg::with_name("vhost-user-blk")
                 .long("vhost-user-blk")
                 .help(
-                    "Block parameters \"bootindex=<boot_index>,\
-                     sock=<socket_path>, num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>, config_wce=<value_of_wce>\"",
+                    "Block parameters \"sock=<socket_path>,\
+                    num_queues=<number_of_queues>,\
+                    queue_size=<size_of_each_queue>, \
+                    config_wce=<value_of_wce>\"",
                 )
                 .takes_value(true),
         )

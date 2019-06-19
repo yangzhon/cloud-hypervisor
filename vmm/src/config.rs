@@ -44,11 +44,11 @@ pub enum Error<'a> {
     ParseVuNetMacParam(&'a str),
     /// Failed parsing vhost-user-net sock parameter.
     ParseVuSockParam,
-    /// Failed parsing vhost-user-net queue number parameter.
+    /// Failed parsing vhost-user queue number parameter.
     ParseVuNumQueuesParam(std::num::ParseIntError),
-    /// Failed parsing vhost-user-net queue size parameter.
+    /// Failed parsing vhost-user queue size parameter.
     ParseVuQueueSizeParam(std::num::ParseIntError),
-    /// Failed parsing vhost-user-net config_wce parameter.
+    /// Failed parsing vhost-user-blk config_wce parameter.
     ParseVuConfigWceParam(std::num::ParseIntError),
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
@@ -299,7 +299,6 @@ impl<'a> VhostUserNetConfig<'a> {
 }
 
 pub struct VhostUserBlkConfig<'a> {
-    pub bootindex: usize,
     pub sock: &'a Path,
     pub num_queues: usize,
     pub queue_size: u16,
@@ -315,16 +314,13 @@ impl<'a> VhostUserBlkConfig<'a> {
         /// Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = vhost_user_blk.unwrap().split(',').collect();
 
-        let mut bootindex: &str = "";
         let mut sock: &str = "";
         let mut num_queues_str: &str = "";
         let mut queue_size_str: &str = "";
         let mut config_wce_str: &str = "";
 
         for param in params_list.iter() {
-            if param.starts_with("bootindex=") {
-                bootindex_str = &param[10..];
-            } else if param.starts_with("sock=") {
+            if param.starts_with("sock=") {
                 sock = &param[5..];
             } else if param.starts_with("num_queues=") {
                 num_queues_str = &param[11..];
@@ -335,16 +331,9 @@ impl<'a> VhostUserBlkConfig<'a> {
             }
         }
 
-        let mut bootindex: usize = 0;;
         let mut num_queues: usize = 2;
         let mut queue_size: u16 = 128;
-        let mut config_wce: u16 = 0;
-
-        if !bootindex.is_empty() {
-            bootindex = bootindex_str
-                .parse()
-                .map_err(Error::ParseVuNetMacParam)?;
-        }
+        let mut config_wce: u8 = 0;
 
         if !num_queues_str.is_empty() {
             num_queues = num_queues_str
@@ -363,7 +352,6 @@ impl<'a> VhostUserBlkConfig<'a> {
         }
 
         Ok(Some(VhostUserBlkConfig {
-            bootindex,
             sock: Path::new(sock),
             num_queues,
             queue_size,

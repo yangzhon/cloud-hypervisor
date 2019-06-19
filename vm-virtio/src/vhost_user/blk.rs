@@ -41,25 +41,23 @@ pub struct Blk {
 
 impl Blk {
     /// Create a new vhost-user-blk device
-    pub fn new(bootindex: usize, path: &str, num_queues: usize, queue_size: u16, config_wce: u8) -> Result<Blk> {
+    pub fn new(path: &str, num_queues: usize, queue_size: u16, config_wce: u8) -> Result<Blk> {
         let vhost_user_blk =
             Master::connect(path, num_queues as u64).map_err(Error::VhostUserCreateMaster)?;
 
         let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?;
 
-        let mut avail_features = 1 << VIRTIO_BLK_F_SIZE_MAX
-            | 1 << VIRTIO_BLK_F_SEG_MAX
-            | 1 << VIRTIO_BLK_F_TOPOLOGY
-            | 1 << VIRTIO_BLK_F_BLK_SIZE
-            | 1 << VIRTIO_BLK_F_FLUSH
-            | 1 << VIRTIO_BLK_F_CONFIG_WCE
-            | 1 << VIRTIO_F_VERSION_1
-            | 1 << VHOST_USER_F_PROTOCOL_FEATURES;
+        let mut avail_features = 1 << virtio_blk::VIRTIO_BLK_F_SIZE_MAX
+            | 1 << virtio_blk::VIRTIO_BLK_F_SEG_MAX
+            | 1 << virtio_blk::VIRTIO_BLK_F_TOPOLOGY
+            | 1 << virtio_blk::VIRTIO_BLK_F_BLK_SIZE
+            | 1 << virtio_blk::VIRTIO_BLK_F_FLUSH
+            | 1 << virtio_blk::VIRTIO_BLK_F_CONFIG_WCE
+            | 1 << virtio_blk::VIRTIO_F_VERSION_1;
 
-        /// wce is u8.
         let mut config_space = Vec::with_capacity(1);
         unsafe { config_space.set_len(1) }
-        config_space[..].copy_from_slice(config_wce.get_bytes());
+        config_space[..].copy_from_slice(&[config_wce]);
 
         Ok(Blk {
             vhost_user_blk: vhost_user_blk,
