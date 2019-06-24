@@ -331,7 +331,7 @@ impl<'a> VhostUserBlkConfig<'a> {
             }
         }
 
-        let mut num_queues: usize = 2;
+        let mut num_queues: usize = 1;
         let mut queue_size: u16 = 128;
         let mut config_wce: u8 = 0;
 
@@ -346,7 +346,7 @@ impl<'a> VhostUserBlkConfig<'a> {
                 .map_err(Error::ParseVuQueueSizeParam)?;
         }
         if !config_wce_str.is_empty() {
-            queue_size = config_wce_str
+            config_wce = config_wce_str
                 .parse()
                 .map_err(Error::ParseVuConfigWceParam)?;
         }

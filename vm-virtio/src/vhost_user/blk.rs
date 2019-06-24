@@ -24,11 +24,56 @@ use super::{Error, Result};
 use vhost_rs::vhost_user::Master;
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use virtio_bindings::virtio_blk;
+use std::mem;
 
 pub const VIRTIO_RING_F_INDIRECT_DESC: ::std::os::raw::c_uint = 28;
 pub const VIRTIO_RING_F_EVENT_IDX: ::std::os::raw::c_uint = 29;
 pub const VIRTIO_F_NOTIFY_ON_EMPTY: ::std::os::raw::c_uint = 24;
 pub const VIRTIO_F_VERSION_1: ::std::os::raw::c_uint = 32;
+
+macro_rules! offset_of {
+    ($ty:ty, $field:ident) => {
+        unsafe { &(*(0 as *const $ty)).$field as *const _ as usize }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(C)]
+struct virtio_blk_geometry {
+    cylinders: u16,
+    heads: u8,
+    sectors: u8,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(C)]
+struct virtio_blk_topology {
+    physical_block_exp: u8,
+    alignment_offset: u8,
+    min_io_size: u16,
+    opt_io_size: u32,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(C)]
+struct virtio_blk_config {
+    capacity: u64,
+    size_max: u32,
+    seg_max: u32,
+    geometry: virtio_blk_geometry,
+    blk_size: u32,
+    topology: virtio_blk_topology,
+    wce: u8,
+    unused0: [u8; 1],
+    num_queues: u16,
+    max_discard_sectors: u32,
+    max_discard_seg: u32,
+    discard_sector_alignment: u32,
+    max_write_zeroes_sectors: u32,
+    max_write_zeroes_seg: u32,
+    write_zeroes_may_unmap: u8,
+    unused1: [u8; 3],
+}
 
 pub struct Blk {
     vhost_user_blk: Master,
@@ -52,12 +97,24 @@ impl Blk {
             | 1 << virtio_blk::VIRTIO_BLK_F_TOPOLOGY
             | 1 << virtio_blk::VIRTIO_BLK_F_BLK_SIZE
             | 1 << virtio_blk::VIRTIO_BLK_F_FLUSH
-            | 1 << virtio_blk::VIRTIO_BLK_F_CONFIG_WCE
             | 1 << virtio_blk::VIRTIO_F_VERSION_1;
 
-        let mut config_space = Vec::with_capacity(1);
-        unsafe { config_space.set_len(1) }
-        config_space[..].copy_from_slice(&[config_wce]);
+        if num_queues > 1 {
+           avail_features |= 1 << virtio_blk::VIRTIO_BLK_F_MQ;
+        }
+
+        if config_wce > 0 {
+           avail_features |= 1 << virtio_blk::VIRTIO_BLK_F_CONFIG_WCE;
+        }
+
+        let config_len = mem::size_of::<virtio_blk_config>;
+        let mut config_space = Vec::with_capacity(config_len as usize);
+        config_space.resize(config_len as usize, 0);
+
+        //let offset = unsafe {libc::offsetof(struct virtio_blk_config, wce)};
+        let offset = offset_of!(virtio_blk_config, wce);
+        // only set wce value.
+        config_space[offset] = config_wce;
 
         Ok(Blk {
             vhost_user_blk: vhost_user_blk,
@@ -76,7 +133,6 @@ impl Blk {
         queue_evts: Vec<EventFd>,
         vhost_user_interrupt: &EventFd,
     ) -> Result<()> {
-        // Preliminary setup for vhost net.
         self.vhost_user_blk
             .set_owner()
             .map_err(Error::VhostUserSetOwner)?;
