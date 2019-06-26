@@ -107,7 +107,7 @@ impl Blk {
            avail_features |= 1 << virtio_blk::VIRTIO_BLK_F_CONFIG_WCE;
         }
 
-        let config_len = mem::size_of::<virtio_blk_config>;
+        let config_len = mem::size_of::<virtio_blk_config>();
         let mut config_space = Vec::with_capacity(config_len as usize);
         config_space.resize(config_len as usize, 0);
 
