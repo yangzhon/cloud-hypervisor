@@ -60,6 +60,20 @@ pub enum Error {
     VhostUserSetVringCall(VhostError),
     /// Set vring kick failed.
     VhostUserSetVringKick(VhostError),
+    /// Set config failed
+    VhostUserSetConfig(VhostError),
+    /// Get config failed
+    VhostUserGetConfig(VhostError),
+    /// Connection to socket failed.
+    VhostUserConnect(VhostError),
+    /// Get protocol features failed.
+    VhostUserGetProtocolFeatures(VhostError),
+    /// Set protocol features failed.
+    VhostUserSetProtocolFeatures(VhostError),
+
+    /// Invalid features provided from vhost-user backend.
+    InvalidFeatures,
+
     /// Failed to create vhost eventfd.
     VhostIrqCreate(io::Error),
     /// Failed to read vhost eventfd.

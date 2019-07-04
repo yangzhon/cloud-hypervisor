@@ -22,10 +22,15 @@ use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDev
 use super::handler::VhostUserEpollHandler;
 use super::{Error, Result};
 use vhost_rs::vhost_user::Master;
+use vhost_rs::vhost_user::VhostUserMaster;
+use vhost_rs::vhost_user::message::VhostUserConfigFlags;
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
+use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use virtio_bindings::virtio_blk;
 use std::mem;
 
+pub const VIRTIO_F_VERSION_1_BITMASK: u64 = 1 << VIRTIO_F_VERSION_1;
+pub const NUM_QUEUE_OFFSET: usize = 1;
 pub const VIRTIO_RING_F_INDIRECT_DESC: ::std::os::raw::c_uint = 28;
 pub const VIRTIO_RING_F_EVENT_IDX: ::std::os::raw::c_uint = 29;
 pub const VIRTIO_F_NOTIFY_ON_EMPTY: ::std::os::raw::c_uint = 24;
@@ -86,32 +91,42 @@ pub struct Blk {
 
 impl Blk {
     /// Create a new vhost-user-blk device
-    pub fn new(path: &str, num_queues: usize, queue_size: u16, config_wce: u8) -> Result<Blk> {
-        let vhost_user_blk =
-            Master::connect(path, num_queues as u64).map_err(Error::VhostUserCreateMaster)?;
+    pub fn new(path: &str, req_num_queues: usize, queue_size: u16, config_wce: u8) -> Result<Blk> {
+        // Calculate the actual number of queues needed.
+        let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
+        // Connect to the vhost-user socket.
+        let mut vhost_user_blk =
+            Master::connect(path, num_queues as u64).map_err(Error::VhostUserConnect)?;
 
         let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?;
-
-        let mut avail_features = 1 << virtio_blk::VIRTIO_BLK_F_SIZE_MAX
-            | 1 << virtio_blk::VIRTIO_BLK_F_SEG_MAX
-            | 1 << virtio_blk::VIRTIO_BLK_F_TOPOLOGY
-            | 1 << virtio_blk::VIRTIO_BLK_F_BLK_SIZE
-            | 1 << virtio_blk::VIRTIO_BLK_F_FLUSH
-            | 1 << virtio_blk::VIRTIO_F_VERSION_1;
-
-        if num_queues > 1 {
-           avail_features |= 1 << virtio_blk::VIRTIO_BLK_F_MQ;
+        // Retrieve available features only when connecting the first time.
+        let mut avail_features = vhost_user_blk.get_features().map_err(Error::VhostUserGetFeatures)?;
+        // Let only ack features we expect, that is VIRTIO_F_VERSION_1.
+        if (avail_features & VIRTIO_F_VERSION_1_BITMASK) != VIRTIO_F_VERSION_1_BITMASK {
+            return Err(Error::InvalidFeatures);
         }
-
-        if config_wce > 0 {
-           avail_features |= 1 << virtio_blk::VIRTIO_BLK_F_CONFIG_WCE;
+        avail_features =
+            VIRTIO_F_VERSION_1_BITMASK | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+        vhost_user_blk
+            .set_features(avail_features)
+            .map_err(Error::VhostUserSetFeatures)?;
+        // Identify if protocol features are supported by the slave.
+        if (avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits())
+            == VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+        {
+            let mut protocol_features = vhost_user_blk
+                .get_protocol_features()
+                .map_err(Error::VhostUserGetProtocolFeatures)?;
+            protocol_features &= VhostUserProtocolFeatures::MQ;
+            vhost_user_blk
+                .set_protocol_features(protocol_features)
+                .map_err(Error::VhostUserSetProtocolFeatures)?;
         }
 
         let config_len = mem::size_of::<virtio_blk_config>();
         let mut config_space = Vec::with_capacity(config_len as usize);
         config_space.resize(config_len as usize, 0);
 
-        //let offset = unsafe {libc::offsetof(struct virtio_blk_config, wce)};
         let offset = offset_of!(virtio_blk_config, wce);
         // only set wce value.
         config_space[offset] = config_wce;
@@ -133,6 +148,7 @@ impl Blk {
         queue_evts: Vec<EventFd>,
         vhost_user_interrupt: &EventFd,
     ) -> Result<()> {
+        println!("--------------enter setup_vub-----");
         self.vhost_user_blk
             .set_owner()
             .map_err(Error::VhostUserSetOwner)?;
@@ -201,6 +217,7 @@ impl Blk {
                 .map_err(Error::VhostUserSetVringKick)?;
         }
 
+        println!("--------------exit setup_vub-----");
         Ok(())
     }
 }
@@ -221,6 +238,7 @@ impl VirtioDevice for Blk {
     }
 
     fn features(&self, page: u32) -> u32 {
+        println!("--------------enter features()-----");
         match page {
             0 => self.avail_features as u32,
             1 => (self.avail_features >> 32) as u32,
@@ -232,6 +250,7 @@ impl VirtioDevice for Blk {
     }
 
     fn ack_features(&mut self, page: u32, value: u32) {
+        println!("--------------enter ack_features()-----");
         let mut v = match page {
             0 => u64::from(value),
             1 => u64::from(value) << 32,
@@ -249,14 +268,33 @@ impl VirtioDevice for Blk {
             v &= !unrequested_features;
         }
         self.acked_features |= v;
+
+        println!("--------------exit ack_features = {:x}-----", self.acked_features);
     }
 
-    fn read_config(&self, offset: u64, mut data: &mut [u8]) {
+    fn read_config(&mut self, offset: u64, mut data: &mut [u8]) {
         let config_len = self.config_space.len() as u64;
         if offset >= config_len {
             error!("Failed to read config space");
             return;
         }
+
+        println!("--------------enter read_config-----");
+        //let mut config_space = Vec::with_capacity(config_len as usize);
+        //config_space.resize(config_len as usize, 0);
+        //let config_len = mem::size_of::<virtio_blk_config>();
+        let wce_offset = offset_of!(virtio_blk_config, wce);
+        // Get wce value from blk::new()
+        let wce = self.config_space[wce_offset];
+        //Get the struct virtio_blk_config from backend
+        self.config_space = self.vhost_user_blk
+                                .get_config(0x100+0, config_len as u32, VhostUserConfigFlags::WRITABLE)
+                                .unwrap();
+
+        if wce != self.config_space[wce_offset] {
+           self.config_space[wce_offset] = wce;
+        }
+
         if let Some(end) = offset.checked_add(data.len() as u64) {
             // This write can't fail, offset and end are checked against config_len.
             data.write_all(&self.config_space[offset as usize..cmp::min(end, config_len) as usize])
