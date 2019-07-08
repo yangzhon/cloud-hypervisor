@@ -43,31 +43,19 @@ macro_rules! offset_of {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(C)]
-struct virtio_blk_geometry {
-    cylinders: u16,
-    heads: u8,
-    sectors: u8,
-}
-
-#[derive(Copy, Clone, Debug, Default)]
-#[repr(C)]
-struct virtio_blk_topology {
-    physical_block_exp: u8,
-    alignment_offset: u8,
-    min_io_size: u16,
-    opt_io_size: u32,
-}
-
-#[derive(Copy, Clone, Debug, Default)]
-#[repr(C)]
+#[repr(C, packed)]
 struct virtio_blk_config {
     capacity: u64,
     size_max: u32,
     seg_max: u32,
-    geometry: virtio_blk_geometry,
+    cylinders: u16,
+    heads: u8,
+    sectors: u8,
     blk_size: u32,
-    topology: virtio_blk_topology,
+    physical_block_exp: u8,
+    alignment_offset: u8,
+    min_io_size: u16,
+    opt_io_size: u32,
     wce: u8,
     unused0: [u8; 1],
     num_queues: u16,
@@ -101,12 +89,14 @@ impl Blk {
         let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?;
         // Retrieve available features only when connecting the first time.
         let mut avail_features = vhost_user_blk.get_features().map_err(Error::VhostUserGetFeatures)?;
+        println!("-------0------blk::new() avail_features = {:x}-----", avail_features);
         // Let only ack features we expect, that is VIRTIO_F_VERSION_1.
         if (avail_features & VIRTIO_F_VERSION_1_BITMASK) != VIRTIO_F_VERSION_1_BITMASK {
             return Err(Error::InvalidFeatures);
         }
         avail_features =
             VIRTIO_F_VERSION_1_BITMASK | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+        println!("-------1------blk::new() avail_features = {:x}-----", avail_features);
         vhost_user_blk
             .set_features(avail_features)
             .map_err(Error::VhostUserSetFeatures)?;
@@ -117,7 +107,7 @@ impl Blk {
             let mut protocol_features = vhost_user_blk
                 .get_protocol_features()
                 .map_err(Error::VhostUserGetProtocolFeatures)?;
-            protocol_features &= VhostUserProtocolFeatures::MQ;
+            protocol_features |= VhostUserProtocolFeatures::MQ;
             vhost_user_blk
                 .set_protocol_features(protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
@@ -153,6 +143,7 @@ impl Blk {
             .set_owner()
             .map_err(Error::VhostUserSetOwner)?;
 
+        println!("-------1-----setup_vub() acked_features = {:x}-----", self.acked_features);
         self.vhost_user_blk
             .set_features(self.acked_features)
             .map_err(Error::VhostUserSetFeatures)?;
@@ -279,7 +270,7 @@ impl VirtioDevice for Blk {
             return;
         }
 
-        println!("--------------enter read_config-----");
+        println!("--------------enter read_config----config_len = {:x}-", config_len);
         //let mut config_space = Vec::with_capacity(config_len as usize);
         //config_space.resize(config_len as usize, 0);
         //let config_len = mem::size_of::<virtio_blk_config>();
@@ -291,6 +282,7 @@ impl VirtioDevice for Blk {
                                 .get_config(0x100+0, config_len as u32, VhostUserConfigFlags::WRITABLE)
                                 .unwrap();
 
+        println!("------0-------- read_config-----");
         if wce != self.config_space[wce_offset] {
            self.config_space[wce_offset] = wce;
         }
@@ -299,6 +291,7 @@ impl VirtioDevice for Blk {
             // This write can't fail, offset and end are checked against config_len.
             data.write_all(&self.config_space[offset as usize..cmp::min(end, config_len) as usize])
                 .unwrap();
+        println!("-------1------- read_config-----");
         }
     }
 
