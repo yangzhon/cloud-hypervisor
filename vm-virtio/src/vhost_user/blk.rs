@@ -279,7 +279,7 @@ impl VirtioDevice for Blk {
         let wce = self.config_space[wce_offset];
         //Get the struct virtio_blk_config from backend
         self.config_space = self.vhost_user_blk
-                                .get_config(0x100+0, config_len as u32, VhostUserConfigFlags::WRITABLE)
+                                .get_config(0, config_len as u32, VhostUserConfigFlags::WRITABLE)
                                 .unwrap();
 
         println!("------0-------- read_config-----");
