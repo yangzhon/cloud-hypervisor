@@ -19,9 +19,10 @@ vm-allocator = { path = "../vm-allocator" }
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 
 [dependencies.vhost_rs]
-git = "https://github.com/jiangliu/vhost"
-branch = "v1"
-features = ["vhost-user-master", "vhost-kern"]
+#git = "https://github.com/yangzhon/vhost"
+#branch = "debug"
+path = "../vhost"
+features = ["vhost-user-master"]
 
 [dependencies.vm-memory]
 git = "https://github.com/sboeuf/vm-memory"
