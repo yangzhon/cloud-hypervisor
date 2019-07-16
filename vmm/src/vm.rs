@@ -16,6 +16,7 @@ extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
 extern crate net_util;
+extern crate nix;
 extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
@@ -32,6 +33,7 @@ use libc::O_TMPFILE;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::loader::KernelLoader;
 use net_util::Tap;
+use nix::unistd;
 use pci::{
     InterruptDelivery, InterruptParameters, PciConfigIo, PciDevice, PciInterruptPin, PciRoot,
 };
@@ -40,7 +42,8 @@ use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, stdout};
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::path::Path;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
@@ -177,6 +180,9 @@ pub enum DeviceManagerError {
 
     /// Cannot create virtio-net device
     CreateVirtioNet(vm_virtio::net::Error),
+
+    /// Cannot create vhost-user-net device
+    CreateVhostUserNet(vm_virtio::vhost_user::Error),
 
     /// Cannot create virtio-rng device
     CreateVirtioRng(io::Error),
@@ -716,6 +722,31 @@ impl DeviceManager {
             }
         }
 
+        // Add virtio-fs if required
+        if let Some(vhost_user_net_list_cfg) = &vm_cfg.vhost_user_net {
+            for vhost_user_net_cfg in vhost_user_net_list_cfg.iter() {
+                if let Some(vhost_user_net_sock) = vhost_user_net_cfg.sock.to_str() {
+                    let vhost_user_net_device = vm_virtio::vhost_user::Net::new(
+                        vhost_user_net_cfg.mac,
+                        vhost_user_net_sock,
+                        vhost_user_net_cfg.num_queues,
+                        vhost_user_net_cfg.queue_size,
+                    )
+                    .map_err(DeviceManagerError::CreateVhostUserNet)?;
+
+                    DeviceManager::add_virtio_pci_device(
+                        Box::new(vhost_user_net_device),
+                        memory.clone(),
+                        allocator,
+                        vm_fd,
+                        &mut pci,
+                        &mut mmio_bus,
+                        &interrupt_info,
+                    )?;
+                }
+            }
+        }
+
         let pci = Arc::new(Mutex::new(pci));
 
         Ok(DeviceManager {
@@ -952,17 +983,36 @@ impl<'a> Vm<'a> {
             Some(file) => {
                 let mut mem_regions = Vec::<(GuestAddress, usize, Option<FileOffset>)>::new();
                 for region in arch_mem_regions.iter() {
-                    let file = OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .custom_flags(O_TMPFILE)
-                        .open(file)
-                        .map_err(Error::SharedFileCreate)?;
+                    if file.is_file() {
+                        let file = OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .custom_flags(O_TMPFILE)
+                            .open(file)
+                            .map_err(Error::SharedFileCreate)?;
 
-                    file.set_len(region.1 as u64)
-                        .map_err(Error::SharedFileSetLen)?;
+                        file.set_len(region.1 as u64)
+                            .map_err(Error::SharedFileSetLen)?;
 
-                    mem_regions.push((region.0, region.1, Some(FileOffset::new(file, 0))));
+                        mem_regions.push((region.0, region.1, Some(FileOffset::new(file, 0))));
+                    } else if file.is_dir() {
+                        let fs = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
+                        println!("fs is {}", fs);
+                        let fp = Path::new(&fs);
+                        let fd = match unistd::mkstemp(fp) {
+                            Ok((fd, path)) => {
+                                unistd::unlink(path.as_path()).unwrap();
+                                fd
+                            }
+                            Err(e) => panic!("mkstemp failed: {}", e),
+                        };
+                        if let Err(_e) = unistd::ftruncate(fd, region.1 as i64) {
+                            panic!("ftruncate failed: {}", _e);
+                        }
+
+                        let f = unsafe { File::from_raw_fd(fd) };
+                        mem_regions.push((region.0, region.1, Some(FileOffset::new(f, 0))));
+                    }
                 }
 
                 GuestMemoryMmap::with_files(&mem_regions).map_err(Error::GuestMemory)?
