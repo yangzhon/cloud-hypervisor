@@ -89,6 +89,18 @@ fn main() {
                 .min_values(0),
         )
         .arg(
+            Arg::with_name("vhost-user-blk")
+                .long("vhost-user-blk")
+                .help(
+                    "Block parameters \"sock=<socket_path>,\
+                    num_queues=<number_of_queues>,\
+                    queue_size=<size_of_each_queue>, \
+                    config_wce=<value_of_wce>\"",
+                )
+                .takes_value(true)
+                .min_values(0),
+        )
+        .arg(
             Arg::with_name("serial")
                 .long("serial")
                 .help("Control serial port: off|tty|file=/path/to/a/file")
@@ -123,6 +135,7 @@ fn main() {
     let fs: Option<Vec<&str>> = cmd_arguments.values_of("fs").map(|x| x.collect());
     let pmem: Option<Vec<&str>> = cmd_arguments.values_of("pmem").map(|x| x.collect());
     let vhost_user_net: Option<Vec<&str>> = cmd_arguments.values_of("vunet").map(|x| x.collect());
+    let vhost_user_blk: Option<Vec<&str>> = cmd_arguments.values_of("vhost-user-blk").map(|x| x.collect());
 
     let vm_config = match config::VmConfig::parse(config::VmParams {
         cpus,
@@ -136,6 +149,7 @@ fn main() {
         pmem,
         serial,
         vhost_user_net,
+        vhost_user_blk,
     }) {
         Ok(config) => config,
         Err(e) => {
