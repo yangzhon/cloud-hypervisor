@@ -11,11 +11,16 @@ use std;
 use std::io;
 use vhost_rs::Error as VhostError;
 use vm_memory::Error as MmapError;
+use vm_memory::GuestMemoryError;
 
 mod handler;
 pub mod net;
 
+pub use self::net::CtlVirtqueue;
 pub use self::net::Net;
+
+pub const VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN: u16 = 1;
+pub const VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX: u16 = 0x8000;
 
 #[derive(Debug)]
 pub enum Error {
@@ -35,12 +40,22 @@ pub enum Error {
     EpollCtl(io::Error),
     /// Epoll wait error
     EpollWait(io::Error),
+    /// Read queue failed.
+    FailedReadingQueue(io::Error),
+    /// Read process MQ.
+    FailedProcessMQ,
     /// Signal used queue failed.
     FailedSignalingUsedQueue(io::Error),
     /// Read queue failed.
-    FailedReadingQueue(io::Error),
+    GuestMemory(GuestMemoryError),
+    /// Invalid ctrl command
+    InvalidCtlCmd,
+    /// Invalid queue pairs number
+    InvalidQueuePairsNum,
     /// Failed to read vhost eventfd.
     MemoryRegions(MmapError),
+    /// No ueue pairs nummber.
+    NoQueuePairsNum,
     /// Failed to create master.
     VhostUserCreateMaster(VhostError),
     /// Failed to open vhost device.

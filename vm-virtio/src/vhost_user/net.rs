@@ -19,6 +19,7 @@ use vmm_sys_util::eventfd::EventFd;
 use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
 use super::handler::VhostUserEpollHandler;
 use super::{Error, Result};
+use super::{VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN};
 use vhost_rs::vhost_user::{Master, VhostUserMaster};
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use virtio_bindings::virtio_net;
@@ -27,6 +28,22 @@ const VIRTIO_F_EVENT_IDX: ::std::os::raw::c_uint = 29;
 const VIRTIO_F_NOTIFY_ON_EMPTY: ::std::os::raw::c_uint = 24;
 const VIRTIO_F_VERSION_1: ::std::os::raw::c_uint = 32;
 const VHOST_USER_F_PROTOCOL_FEATURES: ::std::os::raw::c_uint = 30;
+
+const CONFIG_SPACE_MAC: usize = MAC_ADDR_LEN;
+const CONFIG_SPACE_STATUS: usize = 2;
+const CONFIG_SPACE_QUEUE_PAIRS: usize = 2;
+const CONFIG_SPACE_VUNET: usize = CONFIG_SPACE_MAC + CONFIG_SPACE_STATUS + CONFIG_SPACE_QUEUE_PAIRS;
+
+pub struct CtlVirtqueue {
+    pub queue_evt: EventFd,
+    pub queue: Queue,
+}
+
+impl CtlVirtqueue {
+    fn new(queue: Queue, queue_evt: EventFd) -> Self {
+        CtlVirtqueue { queue_evt, queue }
+    }
+}
 
 pub struct Net {
     vhost_user_net: Master,
@@ -43,15 +60,16 @@ impl Net {
     pub fn new(
         mac_addr: MacAddr,
         path: &str,
-        num_queues_pairs: usize,
+        num_queue_pairs: usize,
         queue_size: u16,
     ) -> Result<Net> {
-        let num_queues = 2 * num_queues_pairs;
+        let num_queues = 2 * num_queue_pairs;
         let mut vhost_user_net =
             Master::connect(path, num_queues as u64).map_err(Error::VhostUserCreateMaster)?;
 
         let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?;
 
+        // Filling device and vring features VMM supports.
         let mut avail_features = 1 << virtio_net::VIRTIO_NET_F_GUEST_CSUM
             | 1 << virtio_net::VIRTIO_NET_F_CSUM
             | 1 << virtio_net::VIRTIO_NET_F_GUEST_TSO4
@@ -68,29 +86,52 @@ impl Net {
             | 1 << VIRTIO_F_EVENT_IDX;
 
         // Get features from backend, do negotiation to get a feature collection which
-        // both VMM and backend can support.
+        // both VMM and backend support.
         let backend_features = vhost_user_net.get_features().unwrap();
         avail_features &= backend_features;
-        // Set features back here is decided by the vhost crate mechanism, since the 
-        // later vhost call requires backend_features filled in master as a pre-requirement,
-        // which is setup by the call here. Will check if the corresponding logic in vhost
-        // is sensible in the future.
+        // To set features back is decided by the vhost crate mechanism, since the
+        // later vhost call requires backend_features filled in master,
+        // which is setup by the call here. Will check if the corresponding logic
+        // in vhost is sensible in the future.
         vhost_user_net
             .set_features(backend_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
-        let mut config_space = Vec::with_capacity(MAC_ADDR_LEN);
-        unsafe { config_space.set_len(MAC_ADDR_LEN) }
-        config_space[..].copy_from_slice(mac_addr.get_bytes());
-        avail_features |= 1 << virtio_net::VIRTIO_NET_F_MAC;
+        // Enable the following features here which are not need to be negotiated with
+        // vhost-user backends.
+        avail_features |= 1 << virtio_net::VIRTIO_NET_F_MAC
+            | 1 << virtio_net::VIRTIO_NET_F_CTRL_VQ
+            | 1 << virtio_net::VIRTIO_NET_F_MQ;
+
+        // Fill config space which has mac_addr, status and MQ info currently.
+        let mut config_space = mac_addr.get_bytes().to_vec();
+        if num_queue_pairs as u16 >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN
+            && num_queue_pairs as u16 <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX
+        {
+            config_space.resize(CONFIG_SPACE_VUNET, 0);
+            let max_queue_pairs = (num_queue_pairs as u16).to_le_bytes();
+            config_space[CONFIG_SPACE_MAC + CONFIG_SPACE_STATUS..CONFIG_SPACE_VUNET]
+                .copy_from_slice(&max_queue_pairs);
+        }
 
         let mut acked_features = 0;
-        if backend_features & (1 << VHOST_USER_F_PROTOCOL_FEATURES) != 0 {
+        let max_queue_number = if backend_features & (1 << VHOST_USER_F_PROTOCOL_FEATURES) != 0 {
             acked_features |= 1 << VHOST_USER_F_PROTOCOL_FEATURES;
             let protocol_features = vhost_user_net.get_protocol_features().unwrap();
             vhost_user_net
                 .set_protocol_features(protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
+            match vhost_user_net.get_queue_num() {
+                Ok(qn) => qn,
+                Err(_) => num_queues as u64,
+            }
+        } else {
+            num_queues as u64
+        };
+        if num_queues > max_queue_number as usize {
+            error!("vhost-user-net has queue number: {} larger than the max queue number: {} backend allowed\n",
+                num_queues, max_queue_number);
+            return Err(Error::BadQueueNum);
         }
 
         vhost_user_net
@@ -105,6 +146,14 @@ impl Net {
                 .map_err(Error::VhostUserSetVringBase)?;
         }
 
+        let queue_num = if (avail_features & (1 << virtio_net::VIRTIO_NET_F_CTRL_VQ) != 0)
+            && (avail_features & (1 << virtio_net::VIRTIO_NET_F_MQ) != 0)
+        {
+            1 + num_queues
+        } else {
+            num_queues
+        };
+
         Ok(Net {
             vhost_user_net,
             kill_evt,
@@ -112,13 +161,13 @@ impl Net {
             acked_features,
             backend_features,
             config_space,
-            queue_sizes: vec![queue_size; num_queues],
+            queue_sizes: vec![queue_size; queue_num],
         })
     }
 
     pub fn setup_vunet(
         &mut self,
-        mem: GuestMemoryMmap,
+        mem: &GuestMemoryMmap,
         queues: &[Queue],
         queue_evts: Vec<EventFd>,
     ) -> Result<Vec<EventFd>> {
@@ -154,10 +203,6 @@ impl Net {
         let mut vu_interrupt_list = Vec::new();
 
         for (queue_index, ref queue) in queues.iter().enumerate() {
-            self.vhost_user_net
-                .set_vring_enable(queue_index, true)
-                .map_err(Error::VhostUserSetVringEnable)?;
-
             self.vhost_user_net
                 .set_vring_num(queue_index, queue.get_max_size())
                 .map_err(Error::VhostUserSetVringNum)?;
@@ -277,21 +322,34 @@ impl VirtioDevice for Net {
         &mut self,
         mem: GuestMemoryMmap,
         interrupt_cb: Arc<VirtioInterrupt>,
-        queues: Vec<Queue>,
-        queue_evts: Vec<EventFd>,
+        mut queues: Vec<Queue>,
+        mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
+        let handler_kill_evt = self
+            .kill_evt
+            .try_clone()
+            .map_err(|_| ActivateError::CloneKillEventFd)?;
+
+        let cvq = if (self.acked_features & 1 << virtio_net::VIRTIO_NET_F_CTRL_VQ) != 0
+            && (self.acked_features & 1 << virtio_net::VIRTIO_NET_F_MQ) != 0
+        {
+            let cvq_index = queues.len() - 1;
+            let cvq_queue = queues.remove(cvq_index);
+            let cvq_queue_evt = queue_evts.remove(cvq_index);
+            Some(CtlVirtqueue::new(cvq_queue, cvq_queue_evt))
+        } else {
+            None
+        };
+
         for i in 0..queues.len() {
             self.vhost_user_net
                 .set_vring_enable(i, true)
                 .map_err(ActivateError::VhostUserSetVringEnable)?;
         }
 
-        let vu_interrupt_list = self.setup_vunet(mem, &queues, queue_evts).unwrap();
-
-        let handler_kill_evt = self
-            .kill_evt
-            .try_clone()
-            .map_err(|_| ActivateError::CloneKillEventFd)?;
+        let vu_interrupt_list = self
+            .setup_vunet(&mem, &queues, queue_evts)
+            .map_err(ActivateError::VhostUserNetSetup)?;
 
         let _handler_result = thread::Builder::new()
             .name("vhost_user_net".to_string())
@@ -301,6 +359,8 @@ impl VirtioDevice for Net {
                     handler_kill_evt,
                     queues,
                     vu_interrupt_list,
+                    cvq,
+                    mem,
                 );
                 let result = handler.run();
                 if let Err(_e) = result {
