@@ -11,8 +11,10 @@ use vm_memory::Error as MmapError;
 
 mod handler;
 pub mod net;
+pub mod blk;
 
 pub use self::net::Net;
+pub use self::blk::Blk;
 
 #[derive(Debug)]
 pub enum Error {
@@ -74,6 +76,9 @@ pub enum Error {
     VhostUserMemoryRegion(MmapError),
     /// Invalid used address.
     UsedAddress,
+
+    /// Invalid features provided from vhost-user backend
+    InvalidFeatures,
 }
 type Result<T> = std::result::Result<T, Error>;
 const INTERRUPT_STATUS_USED_RING: u32 = 0x1;
