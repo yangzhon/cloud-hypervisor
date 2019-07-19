@@ -361,7 +361,7 @@ impl VirtioDevice for Pmem {
         self.acked_features |= v;
     }
 
-    fn read_config(&self, offset: u64, mut data: &mut [u8]) {
+    fn read_config(&mut self, offset: u64, mut data: &mut [u8]) {
         let config_slice = self.config.as_slice();
         let config_len = config_slice.len() as u64;
         if offset >= config_len {

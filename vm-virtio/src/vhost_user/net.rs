@@ -308,7 +308,7 @@ impl VirtioDevice for Net {
         self.acked_features |= v;
     }
 
-    fn read_config(&self, offset: u64, mut data: &mut [u8]) {
+    fn read_config(&mut self, offset: u64, mut data: &mut [u8]) {
         let config_len = self.config_space.len() as u64;
         if offset >= config_len {
             error!("Failed to read config space");

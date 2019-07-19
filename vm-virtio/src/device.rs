@@ -47,7 +47,7 @@ pub trait VirtioDevice: Send {
     fn ack_features(&mut self, page: u32, value: u32);
 
     /// Reads this device configuration space at `offset`.
-    fn read_config(&self, offset: u64, data: &mut [u8]);
+    fn read_config(&mut self, offset: u64, data: &mut [u8]);
 
     /// Writes to this device configuration space at `offset`.
     fn write_config(&mut self, offset: u64, data: &[u8]);
