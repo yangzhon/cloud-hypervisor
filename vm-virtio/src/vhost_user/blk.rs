@@ -31,6 +31,8 @@ pub const VIRTIO_RING_F_INDIRECT_DESC: ::std::os::raw::c_uint = 28;
 pub const VIRTIO_RING_F_EVENT_IDX: ::std::os::raw::c_uint = 29;
 pub const VIRTIO_F_NOTIFY_ON_EMPTY: ::std::os::raw::c_uint = 24;
 pub const VIRTIO_F_VERSION_1: ::std::os::raw::c_uint = 32;
+pub const VIRTIO_BLK_F_CONFIG_WCE: ::std::os::raw::c_uint = 11;
+pub const VIRTIO_BLK_F_CONFIG_WCE_BITMASK: u64 = 1 << VIRTIO_BLK_F_CONFIG_WCE;
 
 macro_rules! offset_of {
     ($ty:ty, $field:ident) => {
@@ -88,9 +90,6 @@ impl Blk {
         if (avail_features & VIRTIO_F_VERSION_1_BITMASK) != VIRTIO_F_VERSION_1_BITMASK {
             return Err(Error::InvalidFeatures);
         }
-        avail_features =
-            VIRTIO_F_VERSION_1_BITMASK | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
-        println!("-------1------blk::new() avail_features = 0x{:x}-----", avail_features);
         vhost_user_blk
             .set_features(avail_features)
             .map_err(Error::VhostUserSetFeatures)?;
@@ -119,6 +118,10 @@ impl Blk {
         // Only set wce value(u8).
         config_space[wce_offset] = config_wce;
 
+        if config_wce ==1 {
+            // SPDK should expose WCE feature by default.
+            avail_features |= VIRTIO_BLK_F_CONFIG_WCE_BITMASK;
+        }
         let queue_num_offset = offset_of!(virtio_blk_config, num_queues);
 
         // Only set num_queues value(u16).
@@ -307,8 +310,17 @@ impl VirtioDevice for Blk {
             error!("Failed to write config space");
             return;
         }
-        let (_, right) = self.config_space.split_at_mut(offset as usize);
-        right.copy_from_slice(&data[..]);
+        // In fact, write_config() only handle wce value in vhost-user-blk.
+        // so, we can only set wce value here.
+        // Since vhost_set_config callback function in SPDK is NULL, which show
+        // there is not any handle in SPDK side for set_config operation. The
+        // detailed info ref spdk_extern_vhost_pre_msg_handler() in SPDK.
+        if self.config_space[offset as usize] == data[0] {
+            return;
+        }
+        self.vhost_user_blk
+            .set_config(offset as u32, data, VhostUserConfigFlags::WRITABLE);
+        self.config_space[offset as usize] = data[0];
     }
 
     fn activate(
