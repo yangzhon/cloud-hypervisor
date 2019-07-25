@@ -54,6 +54,14 @@ pub enum Error<'a> {
     ParseConsoleParam,
     /// Both console and serial are tty.
     ParseTTYParam,
+    /// Failed parsing vhost-user-net mac parameter.
+    ParseVuNetMacParam(&'a str),
+    /// Failed parsing vhost-user-net sock parameter.
+    ParseVuNetSockParam,
+    /// Failed parsing vhost-user-net queue number parameter.
+    ParseVuNetNumQueuesParam(std::num::ParseIntError),
+    /// Failed parsing vhost-user-net queue size parameter.
+    ParseVuNetQueueSizeParam(std::num::ParseIntError),
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -70,6 +78,7 @@ pub struct VmParams<'a> {
     pub serial: &'a str,
     pub console: &'a str,
     pub devices: Option<Vec<&'a str>>,
+    pub vhost_user_net: Option<Vec<&'a str>>,
 }
 
 fn parse_size(size: &str) -> Result<u64> {
@@ -393,6 +402,65 @@ impl<'a> DeviceConfig<'a> {
     }
 }
 
+pub struct VhostUserNetConfig<'a> {
+    pub mac: MacAddr,
+    pub sock: &'a Path,
+    pub num_queue_pairs: usize,
+    pub queue_size: u16,
+}
+
+impl<'a> VhostUserNetConfig<'a> {
+    pub fn parse(vhost_user_net: &'a str) -> Result<Self> {
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = vhost_user_net.split(',').collect();
+
+        let mut mac_str: &str = "";
+        let mut sock: &str = "";
+        let mut num_queue_pairs_str: &str = "";
+        let mut queue_size_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("mac=") {
+                mac_str = &param[4..];
+            } else if param.starts_with("sock=") {
+                sock = &param[5..];
+            } else if param.starts_with("num_queue_pairs=") {
+                num_queue_pairs_str = &param[16..];
+            } else if param.starts_with("queue_size=") {
+                queue_size_str = &param[11..];
+            }
+        }
+
+        let mut mac: MacAddr = MacAddr::local_random();
+        let mut num_queue_pairs: usize = 1;
+        let mut queue_size: u16 = 256;
+
+        if !mac_str.is_empty() {
+            mac = MacAddr::parse_str(mac_str).map_err(Error::ParseVuNetMacParam)?;
+        }
+        if sock.is_empty() {
+            return Err(Error::ParseVuNetSockParam);
+        }
+        if !num_queue_pairs_str.is_empty() {
+            num_queue_pairs = num_queue_pairs_str
+                .parse()
+                .map_err(Error::ParseVuNetNumQueuesParam)?;
+        }
+        if !queue_size_str.is_empty() {
+            queue_size = queue_size_str
+                .parse()
+                .map_err(Error::ParseVuNetQueueSizeParam)?;
+        }
+
+        Ok(VhostUserNetConfig {
+            mac,
+            sock: Path::new(sock),
+            num_queue_pairs,
+            queue_size,
+        })
+    }
+}
+
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig<'a>,
@@ -406,6 +474,7 @@ pub struct VmConfig<'a> {
     pub serial: ConsoleConfig<'a>,
     pub console: ConsoleConfig<'a>,
     pub devices: Option<Vec<DeviceConfig<'a>>>,
+    pub vhost_user_net: Option<Vec<VhostUserNetConfig<'a>>>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -461,6 +530,15 @@ impl<'a> VmConfig<'a> {
             devices = Some(device_config_list);
         }
 
+        let mut vhost_user_net: Option<Vec<VhostUserNetConfig>> = None;
+        if let Some(vhost_user_net_list) = &vm_params.vhost_user_net {
+            let mut vhost_user_net_config_list = Vec::new();
+            for item in vhost_user_net_list.iter() {
+                vhost_user_net_config_list.push(VhostUserNetConfig::parse(item)?);
+            }
+            vhost_user_net = Some(vhost_user_net_config_list);
+        }
+
         Ok(VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
@@ -474,6 +552,7 @@ impl<'a> VmConfig<'a> {
             serial,
             console,
             devices,
+            vhost_user_net,
         })
     }
 }
