@@ -159,7 +159,8 @@ fn main() {
                 .help(
                     "Network parameters \"mac=<mac_addr>,\
                      sock=<socket_path>, num_queue_pairs=<number_of_queue_pairs>,\
-                     queue_size=<size_of_each_queue>, num_vectors=<number_of_vectors>\"",
+                     queue_size=<size_of_each_queue>, num_vectors=<number_of_vectors>,\
+                     server=<is_server>\"",
                 )
                 .takes_value(true)
                 .min_values(1),
