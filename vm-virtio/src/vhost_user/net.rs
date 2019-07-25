@@ -20,7 +20,7 @@ use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDev
 use super::handler::VhostUserEpollHandler;
 use super::{Error, Result};
 use super::{VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN};
-use vhost_rs::vhost_user::{Master, VhostUserMaster};
+use vhost_rs::vhost_user::{Listener, Master, VhostUserMaster};
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use virtio_bindings::virtio_net;
 
@@ -62,10 +62,17 @@ impl Net {
         path: &str,
         num_queue_pairs: usize,
         queue_size: u16,
+        server: u8,
     ) -> Result<Net> {
         let num_queues = 2 * num_queue_pairs;
-        let mut vhost_user_net =
-            Master::connect(path, num_queues as u64).map_err(Error::VhostUserCreateMaster)?;
+
+        let mut vhost_user_net = if server == 0 {
+            Master::connect(path, num_queues as u64).map_err(Error::VhostUserCreateMaster)?
+        } else {
+            let listener = Listener::new(path, true).unwrap();
+            let sock = listener.accept().map_err(Error::VhostUserSocket)?.unwrap();
+            Master::from_stream(sock, num_queues as u64)
+        };
 
         let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?;
 

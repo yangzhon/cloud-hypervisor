@@ -9,6 +9,7 @@ extern crate vm_memory;
 
 use std;
 use std::io;
+use vhost_rs::vhost_user::Error as VhostUserError;
 use vhost_rs::Error as VhostError;
 use vm_memory::Error as MmapError;
 use vm_memory::GuestMemoryError;
@@ -84,6 +85,8 @@ pub enum Error {
     VhostUserSetVringKick(VhostError),
     /// Set vring enable failed.
     VhostUserSetVringEnable(VhostError),
+    /// Socket error.
+    VhostUserSocket(VhostUserError),
     /// Failed to create vhost eventfd.
     VhostIrqCreate(io::Error),
     /// Failed to read vhost eventfd.
