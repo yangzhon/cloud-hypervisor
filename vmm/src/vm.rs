@@ -468,6 +468,7 @@ struct BusInfo<'a> {
 struct InterruptInfo<'a> {
     msi_capable: bool,
     ioapic: &'a Option<Arc<Mutex<ioapic::Ioapic>>>,
+    msix_num: u16,
 }
 
 struct KernelIoapicIrq {
@@ -556,9 +557,10 @@ impl DeviceManager {
             None
         };
 
-        let interrupt_info = InterruptInfo {
+        let mut interrupt_info = InterruptInfo {
             msi_capable,
             ioapic: &ioapic,
+            msix_num: DEFAULT_MSIX_VEC_NUM,
         };
 
         let serial_writer: Option<Box<io::Write + Send>> = match vm_info.vm_cfg.serial.mode {
@@ -631,7 +633,7 @@ impl DeviceManager {
             allocator,
             &mut pci,
             &mut buses,
-            &interrupt_info,
+            &mut interrupt_info,
             &mut mem_slots,
         )?;
 
@@ -656,7 +658,7 @@ impl DeviceManager {
         allocator: &mut SystemAllocator,
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
+        mut interrupt_info: &mut InterruptInfo,
         mut mem_slots: &mut u32,
     ) -> DeviceManagerResult<()> {
         // Add virtio-blk if required
@@ -683,13 +685,11 @@ impl DeviceManager {
 
         // Add virtio-vhost-user-net if required
         DeviceManager::add_virtio_vhost_user_net_devices(
-            memory.clone(),
+            vm_info,
             allocator,
-            vm_fd,
-            &vm_cfg,
             pci,
             buses,
-            &interrupt_info,
+            &mut interrupt_info,
         )?;
 
         Ok(())
@@ -925,16 +925,14 @@ impl DeviceManager {
     }
 
     fn add_virtio_vhost_user_net_devices(
-        memory: GuestMemoryMmap,
+        vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        vm_cfg: &VmConfig,
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
+        interrupt_info: &mut InterruptInfo,
     ) -> DeviceManagerResult<()> {
         // Add vhost-user-net if required
-        if let Some(vhost_user_net_list_cfg) = &vm_cfg.vhost_user_net {
+        if let Some(vhost_user_net_list_cfg) = &vm_info.vm_cfg.vhost_user_net {
             for vhost_user_net_cfg in vhost_user_net_list_cfg.iter() {
                 if let Some(vhost_user_net_sock) = vhost_user_net_cfg.sock.to_str() {
                     let vhost_user_net_device = vm_virtio::vhost_user::Net::new(
@@ -945,11 +943,13 @@ impl DeviceManager {
                     )
                     .map_err(DeviceManagerError::CreateVhostUserNet)?;
 
+                    interrupt_info.msix_num = vhost_user_net_cfg.num_vectors;
+
                     DeviceManager::add_virtio_pci_device(
                         Box::new(vhost_user_net_device),
-                        memory.clone(),
+                        vm_info.memory.clone(),
                         allocator,
-                        vm_fd,
+                        vm_info.vm_fd,
                         pci,
                         buses,
                         &interrupt_info,
@@ -1023,7 +1023,7 @@ impl DeviceManager {
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
         let msix_num = if interrupt_info.msi_capable {
-            DEFAULT_MSIX_VEC_NUM
+            interrupt_info.msix_num
         } else {
             0
         };

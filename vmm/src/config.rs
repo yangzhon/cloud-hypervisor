@@ -62,6 +62,8 @@ pub enum Error<'a> {
     ParseVuNetNumQueuesParam(std::num::ParseIntError),
     /// Failed parsing vhost-user-net queue size parameter.
     ParseVuNetQueueSizeParam(std::num::ParseIntError),
+    /// Failed parsing vhost-user-net vector number parameter.
+    ParseVuNetNumVectorsParam(std::num::ParseIntError),
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -407,6 +409,7 @@ pub struct VhostUserNetConfig<'a> {
     pub sock: &'a Path,
     pub num_queue_pairs: usize,
     pub queue_size: u16,
+    pub num_vectors: u16,
 }
 
 impl<'a> VhostUserNetConfig<'a> {
@@ -418,6 +421,7 @@ impl<'a> VhostUserNetConfig<'a> {
         let mut sock: &str = "";
         let mut num_queue_pairs_str: &str = "";
         let mut queue_size_str: &str = "";
+        let mut num_vectors_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("mac=") {
@@ -428,6 +432,8 @@ impl<'a> VhostUserNetConfig<'a> {
                 num_queue_pairs_str = &param[16..];
             } else if param.starts_with("queue_size=") {
                 queue_size_str = &param[11..];
+            } else if param.starts_with("num_vectors=") {
+                num_vectors_str = &param[12..];
             }
         }
 
@@ -452,11 +458,25 @@ impl<'a> VhostUserNetConfig<'a> {
                 .map_err(Error::ParseVuNetQueueSizeParam)?;
         }
 
+        // while only one queue pair, vectors is one for change interrup, one per queue.
+        // while multiple queue pairs, control queue is involved, one vector for control queue
+        let num_vectors = if !num_vectors_str.is_empty() {
+            num_vectors_str
+                .parse()
+                .map_err(Error::ParseVuNetNumVectorsParam)?
+        } else {
+            match num_queue_pairs {
+                1 => 3,
+                _ => 2 + 2 * num_queue_pairs as u16,
+            }
+        };
+
         Ok(VhostUserNetConfig {
             mac,
             sock: Path::new(sock),
             num_queue_pairs,
             queue_size,
+            num_vectors,
         })
     }
 }
