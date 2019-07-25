@@ -940,6 +940,7 @@ impl DeviceManager {
                         vhost_user_net_sock,
                         vhost_user_net_cfg.num_queue_pairs,
                         vhost_user_net_cfg.queue_size,
+                        vhost_user_net_cfg.server,
                     )
                     .map_err(DeviceManagerError::CreateVhostUserNet)?;
 

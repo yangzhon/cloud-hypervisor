@@ -410,6 +410,7 @@ pub struct VhostUserNetConfig<'a> {
     pub num_queue_pairs: usize,
     pub queue_size: u16,
     pub num_vectors: u16,
+    pub server: u8,
 }
 
 impl<'a> VhostUserNetConfig<'a> {
@@ -422,6 +423,7 @@ impl<'a> VhostUserNetConfig<'a> {
         let mut num_queue_pairs_str: &str = "";
         let mut queue_size_str: &str = "";
         let mut num_vectors_str: &str = "";
+        let mut server_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("mac=") {
@@ -434,12 +436,15 @@ impl<'a> VhostUserNetConfig<'a> {
                 queue_size_str = &param[11..];
             } else if param.starts_with("num_vectors=") {
                 num_vectors_str = &param[12..];
+            } else if param.starts_with("server=") {
+                server_str = &param[7..];
             }
         }
 
         let mut mac: MacAddr = MacAddr::local_random();
         let mut num_queue_pairs: usize = 1;
         let mut queue_size: u16 = 256;
+        let mut server: u8 = 0;
 
         if !mac_str.is_empty() {
             mac = MacAddr::parse_str(mac_str).map_err(Error::ParseVuNetMacParam)?;
@@ -456,6 +461,11 @@ impl<'a> VhostUserNetConfig<'a> {
             queue_size = queue_size_str
                 .parse()
                 .map_err(Error::ParseVuNetQueueSizeParam)?;
+        }
+        if !server_str.is_empty() {
+            server = server_str
+                .parse()
+                .map_err(Error::ParseVuNetNumVectorsParam)?;
         }
 
         // while only one queue pair, vectors is one for change interrup, one per queue.
@@ -477,6 +487,7 @@ impl<'a> VhostUserNetConfig<'a> {
             num_queue_pairs,
             queue_size,
             num_vectors,
+            server,
         })
     }
 }
