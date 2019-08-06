@@ -1701,4 +1701,50 @@ mod tests {
             Ok(())
         });
     }
+    #[test]
+    fn test_vunet() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let mut qemu_child = Command::new("/home/cathy/qemu/tests/vhost-user-bridge")
+                .spawn()
+                .unwrap();
+
+            let mut cloud_child = Command::new("/root/cloud-hypervisor/target/debug/cloud-hypervisor")
+                .args(&["--cpus", "4"])
+                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&["--console", "off"])
+                .args(&["--serial", "tty"])
+                .args(&["--cmdline", "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3"])
+                .args(&["--vunet", "mac=52:54:00:02:d9:01,sock=/tmp/vubr.sock"])
+                .args(&["--rng"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            let _ = qemu_child.kill();
+            let _ = qemu_child.wait();
+
+            let _ = cloud_child.kill();
+            let _ = cloud_child.wait();
+
+            Ok(())
+        });
+    }
 }
