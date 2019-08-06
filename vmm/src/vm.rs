@@ -16,7 +16,6 @@ extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
 extern crate net_util;
-extern crate nix;
 extern crate vfio;
 extern crate vm_allocator;
 extern crate vm_memory;
@@ -35,7 +34,6 @@ use libc::O_TMPFILE;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::loader::KernelLoader;
 use net_util::Tap;
-use nix::unistd;
 use pci::{
     InterruptDelivery, InterruptParameters, PciConfigIo, PciDevice, PciInterruptPin, PciRoot,
 };
@@ -45,7 +43,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, stdout};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::path::Path;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
@@ -1275,21 +1272,17 @@ impl<'a> Vm<'a> {
 
                         mem_regions.push((region.0, region.1, Some(FileOffset::new(file, 0))));
                     } else if file.is_dir() {
-                        let fs = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
-                        println!("fs is {}", fs);
-                        let fp = Path::new(&fs);
-                        let fd = match unistd::mkstemp(fp) {
-                            Ok((fd, path)) => {
-                                unistd::unlink(path.as_path()).unwrap();
-                                fd
-                            }
-                            Err(e) => panic!("mkstemp failed: {}", e),
-                        };
-                        if let Err(_e) = unistd::ftruncate(fd, region.1 as i64) {
-                            panic!("ftruncate failed: {}", _e);
-                        }
+                        let fs_str = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
+                        let fs = std::ffi::CString::new(fs_str).unwrap();
+                        let mut path = fs.as_bytes_with_nul().to_owned();
+                        let path_ptr = path.as_mut_ptr() as *mut _;
+                        let fd = unsafe { libc::mkstemp(path_ptr) };
+                        unsafe { libc::unlink(path_ptr) };
 
                         let f = unsafe { File::from_raw_fd(fd) };
+                        f.set_len(region.1 as u64)
+                            .map_err(Error::SharedFileSetLen)?;
+
                         mem_regions.push((region.0, region.1, Some(FileOffset::new(f, 0))));
                     }
                 }

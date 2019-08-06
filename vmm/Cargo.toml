@@ -13,7 +13,6 @@ kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master"
 libc = "0.2.60"
 log = "0.4.8"
 net_util = { path = "../net_util" }
-nix = "0.14.1"
 pci = {path = "../pci"}
 qcow = { path = "../qcow" }
 vfio = { path = "../vfio" }
