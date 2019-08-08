@@ -20,6 +20,7 @@ use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDev
 use super::handler::VhostUserEpollHandler;
 use super::{Error, Result};
 use super::{VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN};
+use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_rs::vhost_user::{Listener, Master, VhostUserMaster};
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use virtio_bindings::virtio_net;
@@ -27,12 +28,13 @@ use virtio_bindings::virtio_net;
 const VIRTIO_F_EVENT_IDX: ::std::os::raw::c_uint = 29;
 const VIRTIO_F_NOTIFY_ON_EMPTY: ::std::os::raw::c_uint = 24;
 const VIRTIO_F_VERSION_1: ::std::os::raw::c_uint = 32;
-const VHOST_USER_F_PROTOCOL_FEATURES: ::std::os::raw::c_uint = 30;
 
 const CONFIG_SPACE_MAC: usize = MAC_ADDR_LEN;
 const CONFIG_SPACE_STATUS: usize = 2;
 const CONFIG_SPACE_QUEUE_PAIRS: usize = 2;
 const CONFIG_SPACE_VUNET: usize = CONFIG_SPACE_MAC + CONFIG_SPACE_STATUS + CONFIG_SPACE_QUEUE_PAIRS;
+
+const DEFAULT_QUEUE_NUMBER: usize = 2;
 
 pub struct CtlVirtqueue {
     pub queue_evt: EventFd,
@@ -90,7 +92,8 @@ impl Net {
             | 1 << virtio_net::VIRTIO_NET_F_MRG_RXBUF
             | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
             | 1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_F_EVENT_IDX;
+            | 1 << VIRTIO_F_EVENT_IDX
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
         // Get features from backend, do negotiation to get a feature collection which
         // both VMM and backend support.
@@ -98,20 +101,13 @@ impl Net {
         avail_features &= backend_features;
         // To set features back is decided by the vhost crate mechanism, since the
         // later vhost call requires backend_features filled in master,
-        // which is setup by the call here. Will check if the corresponding logic
-        // in vhost is sensible in the future.
+        // which is setup by the call here.
         vhost_user_net
             .set_features(backend_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
-        // Enable the following features here which are not need to be negotiated with
-        // vhost-user backends.
-        avail_features |= 1 << virtio_net::VIRTIO_NET_F_MAC
-            | 1 << virtio_net::VIRTIO_NET_F_CTRL_VQ
-            | 1 << virtio_net::VIRTIO_NET_F_MQ;
-
-        // Fill config space which has mac_addr, status and MQ info currently.
         let mut config_space = mac_addr.get_bytes().to_vec();
+        avail_features |= 1 << virtio_net::VIRTIO_NET_F_MAC;
         if num_queue_pairs as u16 >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN
             && num_queue_pairs as u16 <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX
         {
@@ -119,22 +115,33 @@ impl Net {
             let max_queue_pairs = (num_queue_pairs as u16).to_le_bytes();
             config_space[CONFIG_SPACE_MAC + CONFIG_SPACE_STATUS..CONFIG_SPACE_VUNET]
                 .copy_from_slice(&max_queue_pairs);
+            avail_features |=
+                1 << virtio_net::VIRTIO_NET_F_CTRL_VQ | 1 << virtio_net::VIRTIO_NET_F_MQ;
         }
 
+        let protocol_features;
         let mut acked_features = 0;
-        let max_queue_number = if backend_features & (1 << VHOST_USER_F_PROTOCOL_FEATURES) != 0 {
-            acked_features |= 1 << VHOST_USER_F_PROTOCOL_FEATURES;
-            let protocol_features = vhost_user_net.get_protocol_features().unwrap();
-            vhost_user_net
-                .set_protocol_features(protocol_features)
-                .map_err(Error::VhostUserSetProtocolFeatures)?;
-            match vhost_user_net.get_queue_num() {
-                Ok(qn) => qn,
-                Err(_) => num_queues as u64,
-            }
+        if backend_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+            acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+            protocol_features = vhost_user_net
+                .get_protocol_features()
+                .map_err(Error::VhostUserGetProtocolFeatures)?;
         } else {
-            num_queues as u64
-        };
+            return Err(Error::VhostUserProtocolNotSupport);
+        }
+
+        let max_queue_number =
+            if protocol_features.bits() & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                vhost_user_net
+                    .set_protocol_features(protocol_features)
+                    .map_err(Error::VhostUserSetProtocolFeatures)?;
+                match vhost_user_net.get_queue_num() {
+                    Ok(qn) => qn,
+                    Err(_) => DEFAULT_QUEUE_NUMBER as u64,
+                }
+            } else {
+                DEFAULT_QUEUE_NUMBER as u64
+            };
         if num_queues > max_queue_number as usize {
             error!("vhost-user-net has queue number: {} larger than the max queue number: {} backend allowed\n",
                 num_queues, max_queue_number);

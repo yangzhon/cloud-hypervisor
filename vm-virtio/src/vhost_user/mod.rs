@@ -61,6 +61,8 @@ pub enum Error {
     VhostUserCreateMaster(VhostError),
     /// Failed to open vhost device.
     VhostUserOpen(VhostError),
+    /// Vhost-user Backend not support vhost-user protocol.
+    VhostUserProtocolNotSupport,
     /// Set owner failed.
     VhostUserSetOwner(VhostError),
     /// Get features failed.
