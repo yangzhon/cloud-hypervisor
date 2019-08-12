@@ -110,13 +110,15 @@ impl Blk {
         let mut config_space = Vec::with_capacity(config_len as usize);
         config_space.resize(config_len as usize, 0);
 
-        let offset = offset_of!(virtio_blk_config, wce);
-        // only set wce value.
-        config_space[offset] = config_wce;
+        let wce_offset = offset_of!(virtio_blk_config, wce);
+        // Only set wce value(u8).
+        config_space[wce_offset] = config_wce;
 
         let queue_num_offset = offset_of!(virtio_blk_config, num_queues);
-        // only setnum_queues value.
-        config_space[queue_num_offset] = num_queues as u8;
+
+        // Only set num_queues value(u16).
+        let num_queues_slice = (num_queues as u16).to_le_bytes();
+        config_space[queue_num_offset..queue_num_offset + mem::size_of::<u16>()].copy_from_slice(&num_queues_slice);
 
         Ok(Blk {
             vhost_user_blk: vhost_user_blk,
@@ -264,6 +266,26 @@ impl VirtioDevice for Blk {
             error!("Failed to read config space");
             return;
         }
+
+        let wce_offset = offset_of!(virtio_blk_config, wce);
+        // Get wce value from blk::new()
+        let wce = self.config_space[wce_offset];
+
+        let queue_offset = offset_of!(virtio_blk_config, num_queues);
+        // Get queue_num value from blk::new()
+        let queue_num = u16::from_le_bytes([self.config_space[queue_offset],self.config_space[queue_offset+1]]);
+        // Get the struct virtio_blk_config from backend
+        self.config_space = self.vhost_user_blk
+                                .get_config(0, config_len as u32, VhostUserConfigFlags::WRITABLE)
+                                .unwrap();
+
+        // Set the wce value into config space
+        self.config_space[wce_offset] = wce;
+
+        // Set the queue num into config space
+        let num_queues_slice = queue_num.to_le_bytes();
+        self.config_space[queue_offset..queue_offset + mem::size_of::<u16>()].copy_from_slice(&num_queues_slice);
+
         if let Some(end) = offset.checked_add(data.len() as u64) {
             // This write can't fail, offset and end are checked against config_len.
             data.write_all(&self.config_space[offset as usize..cmp::min(end, config_len) as usize])
