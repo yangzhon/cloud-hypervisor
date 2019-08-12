@@ -91,6 +91,18 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("vublk")
+                .long("vublk")
+                .help(
+                    "Vhost user Block parameters \"sock=<socket_path>,\
+                    num_queues=<number_of_queues>,\
+                    queue_size=<size_of_each_queue>, \
+                    config_wce=<value_of_wce>\"",
+                )
+                .takes_value(true)
+                .min_values(0),
+        )
+        .arg(
             Arg::with_name("disk")
                 .long("disk")
                 .help("Path to VM disk image")
@@ -198,6 +210,7 @@ fn main() {
     let pmem: Option<Vec<&str>> = cmd_arguments.values_of("pmem").map(|x| x.collect());
     let devices: Option<Vec<&str>> = cmd_arguments.values_of("device").map(|x| x.collect());
     let vhost_user_net: Option<Vec<&str>> = cmd_arguments.values_of("vunet").map(|x| x.collect());
+    let vhost_user_blk: Option<Vec<&str>> = cmd_arguments.values_of("vublk").map(|x| x.collect());
 
     let log_level = match cmd_arguments.occurrences_of("v") {
         0 => LevelFilter::Error,
@@ -237,6 +250,7 @@ fn main() {
         console,
         devices,
         vhost_user_net,
+        vhost_user_blk,
     }) {
         Ok(config) => config,
         Err(e) => {
