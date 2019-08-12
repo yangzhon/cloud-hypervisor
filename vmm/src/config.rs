@@ -56,14 +56,14 @@ pub enum Error<'a> {
     ParseTTYParam,
     /// Failed parsing vhost-user-net mac parameter.
     ParseVuNetMacParam(&'a str),
-    /// Failed parsing vhost-user-net sock parameter.
-    ParseVuNetSockParam,
-    /// Failed parsing vhost-user-net queue number parameter.
-    ParseVuNetNumQueuesParam(std::num::ParseIntError),
-    /// Failed parsing vhost-user-net queue size parameter.
-    ParseVuNetQueueSizeParam(std::num::ParseIntError),
-    /// Failed parsing vhost-user-net vector number parameter.
-    ParseVuNetNumVectorsParam(std::num::ParseIntError),
+    /// Failed parsing vhost-user sock parameter.
+    ParseVuSockParam,
+    /// Failed parsing vhost-user queue number parameter.
+    ParseVuNumQueuesParam(std::num::ParseIntError),
+    /// Failed parsing vhost-user queue size parameter.
+    ParseVuQueueSizeParam(std::num::ParseIntError),
+    /// Failed parsing vhost-user vector number parameter.
+    ParseVuNumVectorsParam(std::num::ParseIntError),
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -450,22 +450,22 @@ impl<'a> VhostUserNetConfig<'a> {
             mac = MacAddr::parse_str(mac_str).map_err(Error::ParseVuNetMacParam)?;
         }
         if sock.is_empty() {
-            return Err(Error::ParseVuNetSockParam);
+            return Err(Error::ParseVuSockParam);
         }
         if !num_queue_pairs_str.is_empty() {
             num_queue_pairs = num_queue_pairs_str
                 .parse()
-                .map_err(Error::ParseVuNetNumQueuesParam)?;
+                .map_err(Error::ParseVuNumQueuesParam)?;
         }
         if !queue_size_str.is_empty() {
             queue_size = queue_size_str
                 .parse()
-                .map_err(Error::ParseVuNetQueueSizeParam)?;
+                .map_err(Error::ParseVuQueueSizeParam)?;
         }
         if !server_str.is_empty() {
             server = server_str
                 .parse()
-                .map_err(Error::ParseVuNetNumVectorsParam)?;
+                .map_err(Error::ParseVuNumVectorsParam)?;
         }
 
         // while only one queue pair, vectors is one for change interrup, one per queue.
@@ -473,7 +473,7 @@ impl<'a> VhostUserNetConfig<'a> {
         let num_vectors = if !num_vectors_str.is_empty() {
             num_vectors_str
                 .parse()
-                .map_err(Error::ParseVuNetNumVectorsParam)?
+                .map_err(Error::ParseVuNumVectorsParam)?
         } else {
             match num_queue_pairs {
                 1 => 3,
