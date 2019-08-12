@@ -200,6 +200,9 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-console device
     CreateVirtioConsole(io::Error),
 
+    /// Cannot create vhost-user-blk device
+    CreateVhostUserBlk(vm_virtio::vhost_user::Error),
+
     /// Cannot create virtio-rng device
     CreateVirtioRng(io::Error),
 
@@ -689,6 +692,15 @@ impl DeviceManager {
             &mut interrupt_info,
         )?;
 
+        // Add virtio-vhost-user-blk if required
+        DeviceManager::add_virtio_vhost_user_blk_devices(
+            vm_info,
+            allocator,
+            pci,
+            buses,
+            &interrupt_info,
+        )?;
+
         Ok(())
     }
 
@@ -956,6 +968,40 @@ impl DeviceManager {
             }
         }
 
+        Ok(())
+    }
+
+    fn add_virtio_vhost_user_blk_devices(
+        vm_info: &VmInfo,
+        allocator: &mut SystemAllocator,
+        pci: &mut PciConfigIo,
+        buses: &mut BusInfo,
+        interrupt_info: &InterruptInfo,
+    ) -> DeviceManagerResult<()> {
+        // Add vhost-user-blk if required
+        if let Some(vhost_user_blk_list_cfg) = &vm_info.vm_cfg.vhost_user_blk {
+            for vhost_user_blk_cfg in vhost_user_blk_list_cfg.iter() {
+                if let Some(vhost_user_blk_sock) = vhost_user_blk_cfg.sock.to_str() {
+                    let vhost_user_blk_device = vm_virtio::vhost_user::Blk::new(
+                        vhost_user_blk_sock,
+                        vhost_user_blk_cfg.num_queues,
+                        vhost_user_blk_cfg.queue_size,
+                        vhost_user_blk_cfg.config_wce,
+                    )
+                    .map_err(DeviceManagerError::CreateVhostUserBlk)?;
+
+                    DeviceManager::add_virtio_pci_device(
+                        Box::new(vhost_user_blk_device),
+                        vm_info.memory.clone(),
+                        allocator,
+                        vm_info.vm_fd,
+                        pci,
+                        buses,
+                        &interrupt_info,
+                    )?;
+                }
+            }
+        }
         Ok(())
     }
 
