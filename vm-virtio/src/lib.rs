@@ -130,6 +130,8 @@ pub enum ActivateError {
     VhostUserSetup(fs::Error),
     /// Failed to setup vhost-user daemon.
     VhostUserNetSetup(vhost_user::Error),
+    /// Failed to setup vhost-user daemon.
+    VhostUserBlkSetup(vhost_user::Error),
     /// Set vring enable failed.
     VhostUserSetVringEnable(VhostError),
 }

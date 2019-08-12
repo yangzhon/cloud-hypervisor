@@ -16,9 +16,11 @@ use vm_memory::GuestMemoryError;
 
 mod handler;
 pub mod net;
+pub mod blk;
 
 pub use self::net::CtlVirtqueue;
 pub use self::net::Net;
+pub use self::blk::Blk;
 
 pub const VIRTIO_MQ_VQ_PAIRS_MIN: u16 = 1;
 pub const VIRTIO_MQ_VQ_PAIRS_MAX: u16 = 0x8000;
@@ -97,5 +99,7 @@ pub enum Error {
     VhostUserMemoryRegion(MmapError),
     /// Invalid used address.
     UsedAddress,
+    /// Invalid features provided from vhost-user backend
+    InvalidFeatures,
 }
 type Result<T> = std::result::Result<T, Error>;
