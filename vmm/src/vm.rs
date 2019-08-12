@@ -698,7 +698,7 @@ impl DeviceManager {
             allocator,
             pci,
             buses,
-            &interrupt_info,
+            &mut interrupt_info,
         )?;
 
         Ok(())
@@ -976,7 +976,7 @@ impl DeviceManager {
         allocator: &mut SystemAllocator,
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
+        interrupt_info: &mut InterruptInfo,
     ) -> DeviceManagerResult<()> {
         // Add vhost-user-blk if required
         if let Some(vhost_user_blk_list_cfg) = &vm_info.vm_cfg.vhost_user_blk {
@@ -989,6 +989,10 @@ impl DeviceManager {
                         vhost_user_blk_cfg.config_wce,
                     )
                     .map_err(DeviceManagerError::CreateVhostUserBlk)?;
+
+                    // The msi interrupt num is one config + num of queues
+                    // This value is same with Qemu setting.
+                    interrupt_info.msix_num = vhost_user_blk_cfg.num_queues as u16 + 1;
 
                     DeviceManager::add_virtio_pci_device(
                         Box::new(vhost_user_blk_device),
