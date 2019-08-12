@@ -19,7 +19,7 @@ use vmm_sys_util::eventfd::EventFd;
 use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
 use super::handler::VhostUserEpollHandler;
 use super::{Error, Result};
-use super::{VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN};
+use super::{VIRTIO_MQ_VQ_PAIRS_MAX, VIRTIO_MQ_VQ_PAIRS_MIN};
 use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_rs::vhost_user::{Listener, Master, VhostUserMaster};
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
@@ -108,8 +108,8 @@ impl Net {
 
         let mut config_space = mac_addr.get_bytes().to_vec();
         avail_features |= 1 << virtio_net::VIRTIO_NET_F_MAC;
-        if num_queue_pairs as u16 >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN
-            && num_queue_pairs as u16 <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX
+        if num_queue_pairs as u16 >= VIRTIO_MQ_VQ_PAIRS_MIN
+            && num_queue_pairs as u16 <= VIRTIO_MQ_VQ_PAIRS_MAX
         {
             config_space.resize(CONFIG_SPACE_VUNET, 0);
             let max_queue_pairs = (num_queue_pairs as u16).to_le_bytes();

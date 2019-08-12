@@ -7,7 +7,7 @@ use epoll;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::net::CtlVirtqueue;
-use super::{VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN};
+use super::{VIRTIO_MQ_VQ_PAIRS_MAX, VIRTIO_MQ_VQ_PAIRS_MIN};
 use crate::VirtioInterrupt;
 use std::io;
 use std::os::unix::io::AsRawFd;
@@ -74,8 +74,8 @@ impl VhostUserEpollHandler {
             .read_obj::<u16>(next_desc.addr)
             .map_err(Error::GuestMemory)?;
         println!("ctrl virtqueue has queue_pairs: {}\n", _queue_pairs);
-        if (_queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN)
-            || (_queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX)
+        if (_queue_pairs < VIRTIO_MQ_VQ_PAIRS_MIN)
+            || (_queue_pairs > VIRTIO_MQ_VQ_PAIRS_MAX)
         {
             return Err(Error::InvalidQueuePairsNum);
         }
