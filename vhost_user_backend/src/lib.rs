@@ -87,7 +87,7 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// Set virtio device configuration.
     /// A default implementation is provided as we cannot expect all backends
     /// to implement this function.
-    fn set_config(&mut self, _offset: u32, _buf: &[u8]) -> result::Result<(), io::Error> {
+    fn set_config(&mut self, _offset: u32, _buf: &[u8]) -> VhostUserResult<()> {
         Ok(())
     }
 }
@@ -750,10 +750,6 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             return Err(VhostUserError::InvalidParam);
         }
 
-        self.backend
-            .write()
-            .unwrap()
-            .set_config(offset, buf)
-            .map_err(VhostUserError::ReqHandlerError)
+        self.backend.write().unwrap().set_config(offset, buf)
     }
 }
