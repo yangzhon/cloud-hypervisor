@@ -470,8 +470,20 @@ impl VhostUserBackend for VhostUserBlkBackend {
         Ok(false)
     }
 
-    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
-        Vec::new()
+    fn get_config(&self, offset: u32, size: u32) -> VhostUserResult<Vec<u8>> {
+        let config_len = self.config_space.len() as u32;
+        if offset >= config_len {
+            error!("Failed to read config space");
+            return Err(VhostUserError::InvalidParam);
+        }
+        let mut data = vec![0u8, size as u8];
+        if let Some(end) = offset.checked_add(size) {
+            // This write can't fail, offset and end are checked against config_len.
+            &data
+                .write_all(&self.config_space[offset as usize..cmp::min(end, config_len) as usize])
+                .unwrap();
+        }
+        Ok(data)
     }
 
     fn set_config(&mut self, offset: u32, data: &[u8]) -> result::Result<(), io::Error> {
