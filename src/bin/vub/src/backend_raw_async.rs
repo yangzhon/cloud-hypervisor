@@ -154,10 +154,6 @@ impl Clone for StorageBackendRawAsync {
 */
 
 impl StorageBackend for StorageBackendRawAsync {
-    fn get_config(&self) -> &virtio_blk_config {
-        &self.config
-    }
-
     fn get_sectors(&self) -> u64 {
         self.config.capacity
     }

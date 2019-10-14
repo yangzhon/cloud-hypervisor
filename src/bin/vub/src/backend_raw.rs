@@ -118,10 +118,6 @@ impl Clone for StorageBackendRaw {
 }
 
 impl StorageBackend for StorageBackendRaw {
-    fn get_config(&self) -> &virtio_blk_config {
-        &self.config
-    }
-
     fn get_sectors(&self) -> u64 {
         self.config.capacity
     }

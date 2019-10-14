@@ -8,8 +8,6 @@ use vhost_user_backend::VhostUserBackend;
 use virtio_bindings::bindings::virtio_blk::virtio_blk_config;
 
 pub trait StorageBackend: Read + Seek + Write + VhostUserBackend {
-    fn get_config(&self) -> &virtio_blk_config;
-
     fn get_sectors(&self) -> u64;
 
     fn get_image_id(&self) -> &Vec<u8>;
