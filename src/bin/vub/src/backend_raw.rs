@@ -13,8 +13,8 @@ use std::os::unix::io::AsRawFd;
 
 use crate::backend::StorageBackend;
 use nix::sys::uio;
-use virtio_bindings::bindings::virtio_blk::{virtio_blk_config, VIRTIO_BLK_ID_BYTES};
 use vhost_user_backend::VhostUserBackend;
+use virtio_bindings::bindings::virtio_blk::{virtio_blk_config, VIRTIO_BLK_ID_BYTES};
 
 pub fn build_device_id(image: &File) -> Result<String> {
     let blk_metadata = image.metadata()?;

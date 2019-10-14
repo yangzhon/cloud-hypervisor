@@ -17,10 +17,8 @@ use std::slice;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-use crate::backend::StorageBackend;
-use crate::eventfd::EventFd;
-use crate::message::*;
-use crate::queue::{DescriptorChain, Queue};
+use super::backend::StorageBackend;
+use super::message::*;
 use bitflags::bitflags;
 use log::{debug, error};
 use virtio_bindings::bindings::virtio_blk::*;
@@ -30,8 +28,8 @@ use vm_memory::{
     GuestRegionMmap, MmapRegion,
 };
 
-use vhostuser_rs::message::*;
-use vhostuser_rs::{Error, Result, VhostUserSlave};
+use vhost_rs::message::*;
+use vhost_rs::{Error, Result, VhostUserSlave};
 
 bitflags! {
     pub struct VhostUserBlkFeatures: u64 {
@@ -281,43 +279,32 @@ impl Request {
     }
 }
 
-pub struct Vring {
-    mem: GuestMemoryMmap,
+pub struct VhostUserBlk<S: StorageBackend> {
+    backend: S,
+    mem: Option<GuestMemoryMmap>,
+    memory_regions: Vec<VhostUserMemoryRegion>,
+    num_queues: u16,
+    vrings: HashMap<usize, Arc<Mutex<Vring>>>,
+    vring_default_enabled: bool,
+    owned: bool,
     queue: Queue,
-    call_fd: Option<RawFd>,
-    kick_fd: Option<RawFd>,
-    err_fd: Option<RawFd>,
-    features: u64,
-    _started: bool,
-    enabled: bool,
     async_requests: HashMap<usize, Request>,
-    signalled_used_valid: bool,
-    signalled_used: u16,
 }
 
-impl Vring {
-    fn new(mem: GuestMemoryMmap, queue: Queue) -> Self {
-        Vring {
-            mem,
-            queue,
-            call_fd: None,
-            kick_fd: None,
-            err_fd: None,
-            features: 0,
-            _started: false,
-            enabled: false,
-            async_requests: HashMap::new(),
-            signalled_used_valid: false,
-            signalled_used: 0,
+impl<S: StorageBackend> VhostUserBlk<S> {
+    pub fn new(
+        backend: S,
+        num_queues: u16,
+    ) -> Self {
+        VhostUserBlk {
+            backend,
+            mem: None,
+            memory_regions: vec![],
+            num_queues,
+            vrings: HashMap::new(),
+            vring_default_enabled: false,
+            owned: false,
         }
-    }
-
-    fn get_queue_mut(&mut self) -> &mut Queue {
-        &mut self.queue
-    }
-
-    pub fn get_kick_fd(&self) -> RawFd {
-        self.kick_fd.unwrap()
     }
 
     pub fn process_completions<S>(&mut self, backend: &mut S) -> Result<bool>
@@ -345,11 +332,6 @@ impl Vring {
                     .queue
                     .add_used(&self.mem, request.desc_index, request.data_len);
 
-                if self.should_signal_guest(used_idx) {
-                    self.signal_guest().unwrap();
-                } else {
-                    debug!("omitting guest signal");
-                }
                 count += 1;
             } else {
                 // No completions avaiable, don't waste more time looking for them.
@@ -440,111 +422,4 @@ impl Vring {
         }
     }
 
-    fn vring_need_signal(&mut self, new_idx: u16, old_idx: u16) -> bool {
-        let used_event = self.queue.get_used_event(&self.mem);
-        debug!("used_event={}", used_event);
-
-        if (new_idx - used_event - 1) < (new_idx - old_idx) {
-            true
-        } else {
-            false
-        }
-    }
-
-    fn should_signal_guest(&mut self, used_idx: u16) -> bool {
-        let valid = self.signalled_used_valid;
-        self.signalled_used_valid = true;
-        let old = self.signalled_used;
-        self.signalled_used = used_idx;
-        let new = used_idx;
-
-        return !valid || self.vring_need_signal(new, old);
-    }
-
-    fn signal_guest(&mut self) -> Result<()> {
-        debug!("signaling guest");
-        let signal: u64 = 1;
-        let ret = unsafe {
-            libc::write(
-                self.call_fd.unwrap(),
-                &signal as *const u64 as *const libc::c_void,
-                mem::size_of::<u64>(),
-            )
-        };
-
-        if ret <= 0 {
-            Err(Error::InvalidParam)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl Drop for Vring {
-    fn drop(&mut self) {
-        println!("dropping vring");
-    }
-}
-
-pub struct VhostUserBlk<S: StorageBackend> {
-    backend: S,
-    main_eventfd: EventFd,
-    main_sender: Sender<VubMessage>,
-    mem: Option<GuestMemoryMmap>,
-    memory_regions: Vec<VhostUserMemoryRegion>,
-    num_queues: u16,
-    vrings: HashMap<usize, Arc<Mutex<Vring>>>,
-    vring_default_enabled: bool,
-    owned: bool,
-    features_acked: bool,
-    acked_features: u64,
-    acked_protocol_features: u64,
-}
-
-impl<S: StorageBackend> VhostUserBlk<S> {
-    pub fn new(
-        backend: S,
-        main_eventfd: EventFd,
-        main_sender: Sender<VubMessage>,
-        num_queues: u16,
-    ) -> Self {
-        VhostUserBlk {
-            backend,
-            main_eventfd,
-            main_sender,
-            mem: None,
-            memory_regions: vec![],
-            num_queues,
-            vrings: HashMap::new(),
-            vring_default_enabled: false,
-            owned: false,
-            features_acked: false,
-            acked_features: 0,
-            acked_protocol_features: 0,
-        }
-    }
-
-    pub fn set_backend(&mut self, backend: S) {
-        self.backend = backend;
-    }
-
-    pub fn get_vring(&self, index: usize) -> Result<Arc<Mutex<Vring>>> {
-        let vring = match self.vrings.get(&index) {
-            Some(v) => v,
-            None => return Err(Error::InvalidParam),
-        };
-
-        Ok(vring.clone())
-    }
-
-    fn find_region(&self, addr: u64) -> Result<&VhostUserMemoryRegion> {
-        for region in &self.memory_regions {
-            if addr >= region.userspace_addr && addr <= region.userspace_addr + region.memory_size {
-                return Ok(region);
-            }
-        }
-
-        error!("can't find region for guest address {:?}", addr);
-        Err(Error::InvalidParam)
-    }
 }
