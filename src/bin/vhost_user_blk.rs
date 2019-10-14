@@ -1,5 +1,7 @@
 // Copyright (C) 2019 Red Hat, Inc. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+extern crate vhost_user_backend;
+extern crate vub;
 
 use std::collections::HashMap;
 use std::mem;
@@ -19,6 +21,7 @@ use vhost_user_blk::block::{VhostUserBlk, Vring};
 use vhost_user_blk::eventfd::EventFd;
 use vhost_user_blk::message::*;
 use vhostuser_rs::SlaveListener;
+use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 
 const EVENT_SLAVE_IDX: u64 = 0;
 const EVENT_VUBMSG_IDX: u64 = 1;

@@ -12,13 +12,11 @@ use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 
+use vhost_user_backend::VhostUserBackend;
+
 use crate::backend::StorageBackend;
 use io_uring::UringQueue;
 use virtio_bindings::bindings::virtio_blk::{virtio_blk_config, VIRTIO_BLK_ID_BYTES};
-
-const SECTOR_SHIFT: u8 = 9;
-const SECTOR_SIZE: u64 = (0x01 as u64) << SECTOR_SHIFT;
-const BLK_SIZE: u32 = 512;
 
 pub fn build_device_id(image: &File) -> Result<String> {
     let blk_metadata = image.metadata()?;
@@ -217,5 +215,49 @@ impl StorageBackend for StorageBackendRawAsync {
         }
 
         self.seek(SeekFrom::Start(sector << SECTOR_SHIFT))
+    }
+}
+
+impl VhostUserBackend for StorageBackendRawAsync {
+    fn num_queues(&self) -> usize {
+        NUM_QUEUES
+    }
+
+    fn max_queue_size(&self) -> usize {
+        QUEUE_SIZE as usize
+    }
+
+    fn features(&self) -> u64 {
+        let mut avail_features = 1 << VIRTIO_BLK_F_FLUSH
+            | 1 << VIRTIO_BLK_F_SIZE_MAX
+            | 1 << VIRTIO_BLK_F_SEG_MAX
+            | 1 << VIRTIO_BLK_F_TOPOLOGY
+            | 1 << VIRTIO_BLK_F_BLK_SIZE
+            | 1 << VIRTIO_F_VERSION_1
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+
+        avail_features
+    }
+
+    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
+        self.mem = Some(mem);
+        Ok(())
+    }
+
+    fn handle_event(
+        &mut self,
+        device_event: u16,
+        evset: epoll::Events,
+        vrings: &[Arc<RwLock<Vring>>],
+    ) -> VhostUserBackendResult<bool> {
+        Ok(true)
+    }
+
+    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn set_config(&mut self, offset: u32, data: &[u8]) -> result::Result<(), io::Error> {
+        Ok(())
     }
 }
