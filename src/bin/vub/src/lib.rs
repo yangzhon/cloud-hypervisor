@@ -7,7 +7,6 @@ pub mod backend;
 pub mod backend_raw;
 pub mod backend_raw_async;
 pub mod block;
-pub mod message;
 
 const QUEUE_SIZE: u16 = 256;
 const NUM_QUEUES: usize = 1;

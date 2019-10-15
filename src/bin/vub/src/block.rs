@@ -18,7 +18,6 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use super::backend::StorageBackend;
-use super::message::*;
 use bitflags::bitflags;
 use log::{debug, error};
 use virtio_bindings::bindings::virtio_blk::*;
