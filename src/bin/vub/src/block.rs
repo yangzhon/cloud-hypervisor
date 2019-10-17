@@ -14,14 +14,12 @@ use std::mem;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::result;
 use std::slice;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use super::backend::StorageBackend;
 use bitflags::bitflags;
 use log::{debug, error};
 use virtio_bindings::bindings::virtio_blk::*;
-//use virtio_bindings::bindings::virtio_ring::VRING_USED_F_NO_NOTIFY;
 use vm_memory::{
     Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion,
     GuestRegionMmap, MmapRegion,
@@ -281,32 +279,24 @@ impl Request {
 pub struct VhostUserBlk<S: StorageBackend> {
     backend: S,
     mem: Option<GuestMemoryMmap>,
-    memory_regions: Vec<VhostUserMemoryRegion>,
-    num_queues: u16,
-    vrings: HashMap<usize, Arc<Mutex<Vring>>>,
-    vring_default_enabled: bool,
-    owned: bool,
-    queue: Queue,
     async_requests: HashMap<usize, Request>,
+    poll_ns: u128,
 }
 
 impl<S: StorageBackend> VhostUserBlk<S> {
     pub fn new(
         backend: S,
-        num_queues: u16,
+        poll_ns: u128,
     ) -> Self {
         VhostUserBlk {
             backend,
             mem: None,
-            memory_regions: vec![],
-            num_queues,
-            vrings: HashMap::new(),
-            vring_default_enabled: false,
-            owned: false,
+            async_requests: HashMap::new(),
+            poll_ns,
         }
     }
 
-    pub fn process_completions<S>(&mut self, backend: &mut S) -> Result<bool>
+    fn process_completions<S>(&mut self, backend: &mut S) -> Result<bool>
     where
         S: StorageBackend,
     {
@@ -341,7 +331,7 @@ impl<S: StorageBackend> VhostUserBlk<S> {
         Ok(count != 0)
     }
 
-    pub fn process_queue<S: StorageBackend>(&mut self, backend: &mut S) -> Result<bool> {
+    fn process_queue<S: StorageBackend>(&mut self, backend: &mut S) -> Result<bool> {
         let mut used_desc_heads = [(0, 0); 1024 as usize];
         let mut used_count = 0;
         for avail_desc in self.queue.iter(&self.mem) {
@@ -401,7 +391,7 @@ impl<S: StorageBackend> VhostUserBlk<S> {
         Ok(used_count > 0)
     }
 
-    pub fn disable_notifications(&self) {
+    fn disable_notifications(&self) {
         if self.features & VhostUserBlkFeatures::EVENT_IDX.bits() != 0 {
             self.queue
                 .set_avail_event(&self.mem, self.queue.get_last_avail());
@@ -411,7 +401,7 @@ impl<S: StorageBackend> VhostUserBlk<S> {
         }
     }
 
-    pub fn enable_notifications(&self) {
+    fn enable_notifications(&self) {
         if self.features & VhostUserBlkFeatures::EVENT_IDX.bits() != 0 {
             self.queue
                 .set_avail_event(&self.mem, self.queue.get_last_avail());
@@ -421,13 +411,13 @@ impl<S: StorageBackend> VhostUserBlk<S> {
         }
     }
 
-    fn poll_queues<S: StorageBackend>(&mut self, backend: &mut S) {
+    pub fn poll_queues<S: StorageBackend>(&mut self, backend: &mut S) {
         let mut vring = self.vring.lock().unwrap();
 
-        vring.disable_notifications();
+        self.disable_notifications();
         let mut start_time = Instant::now();
         loop {
-            if vring.process_completions(backend).unwrap() || vring.process_queue(backend).unwrap()
+            if self.process_completions(backend).unwrap() || self.process_queue(backend).unwrap()
             {
                 start_time = Instant::now();
             }
@@ -435,8 +425,8 @@ impl<S: StorageBackend> VhostUserBlk<S> {
             if self.poll_ns == 0
                 || Instant::now().duration_since(start_time).as_nanos() > self.poll_ns
             {
-                vring.enable_notifications();
-                vring.process_queue(backend).unwrap();
+                self.enable_notifications();
+                self.process_queue(backend).unwrap();
                 break;
             }
         }
