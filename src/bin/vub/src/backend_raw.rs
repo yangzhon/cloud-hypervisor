@@ -199,7 +199,29 @@ impl VhostUserBackend for StorageBackendRaw {
         evset: epoll::Events,
         vrings: &[Arc<RwLock<Vring>>],
     ) -> VhostUserBackendResult<bool> {
-        Ok(true)
+        if evset != epoll::Events::EPOLLIN {
+            println!("Invalid events operation!\n");
+            return Ok(false);
+        }
+        match device_event {
+            QUEUE_AVAIL_EVENT => {
+                let mut vring = vrings[0].write().unwrap();
+                if self.poll_queue(&mut vring) {
+                    if let Err(e) = vring.signal_used_queue() {
+                        error!("Failed to signal used queue: {:?}", e);
+                    }
+                }
+            }
+            KILL_EVENT => {
+                self.kill_evt.read().unwrap();
+                println!("KILL_EVENT received, stopping epoll loop");
+                return Ok(true);
+            }
+            _ => {
+                println!("Unknown event for vhost-user-blk-backend");
+            }
+        }
+        Ok(false)
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
