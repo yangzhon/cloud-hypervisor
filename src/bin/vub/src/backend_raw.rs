@@ -244,7 +244,14 @@ impl VhostUserBackend for StorageBackendRaw {
         buf.to_vec()
     }
 
-    fn set_config(&mut self, offset: u32, data: &[u8]) -> result::Result<(), io::Error> {
-        Ok(())
+    fn set_config(&mut self, offset: u32, data: &[u8]) -> VhostUserResult<()> {
+        let data_len = data.len() as u32;
+        let config_len = self.config_space.len() as u32;
+        if offset + data_len > config_len {
+            error!("Failed to write config space");
+            return Err(VhostUserError::InvalidParam);
+        }
+        let (_, right) = self.config_space.split_at_mut(offset as usize);
+        right.copy_from_slice(&data[..]);
     }
 }
