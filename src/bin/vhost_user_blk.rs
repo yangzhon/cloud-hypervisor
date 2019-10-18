@@ -23,10 +23,10 @@ use vub::block::VhostUserBlk;
 fn main() {
     env_logger::init();
 
-    let cmd_args = App::new("qsd")
+    let cmd_args = App::new("vhost-user-blk")
         .version(crate_version!())
         .author(crate_authors!())
-        .about("Serve a vhost-user-blk device for QEMU.")
+        .about("Serve a vhost-user-blk device for Cloud-hypervisor.")
         .arg(
             Arg::with_name("socket")
                 .long("socket")
@@ -112,11 +112,65 @@ fn main() {
         queue_num = 1;
     }
 
-    let storage_backend = match StorageBackendRaw::new(disk_image_path, true, 0) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Can't open disk image {}: {}", disk_image_path, e);
-            exit(-1);
-        }
-    };
+    if async_backend {
+        let uring_efd = EventFd::new().expect("Can't create uring efd");
+        let storage_backend = match StorageBackendRawAsync::new(
+            disk_image_path,
+            uring_efd.as_raw_fd(),
+            readonly,
+            libc::O_DIRECT,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Can't open disk image {}: {}", disk_image_path, e);
+                exit(-1);
+            }
+        };
+    } else {
+        let storage_backend =
+            match StorageBackendRaw::new(disk_image_path, readonly, libc::O_DIRECT) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Can't open disk image {}: {}", disk_image_path, e);
+                    exit(-1);
+                }
+            };
+    }
+
+    let blk_backend = Arc::new(RwLock::new(storage_backend));
+    println!("blk_backend is created!\n");
+
+    let name = "vhost-user-blk-backend";
+    let mut blk_daemon = VhostUserDaemon::new(
+        name.to_string(),
+        socket_path.to_string(),
+        blk_backend.clone(),
+    )
+    .unwrap();
+    println!("blk_daemon is created!\n");
+
+    let vring_worker = blk_daemon.get_vring_worker();
+
+    if vring_worker
+        .register_listener(
+            blk_backend.read().unwrap().kill_evt.as_raw_fd(),
+            epoll::Events::EPOLLIN,
+            u64::from(KILL_EVENT),
+        )
+        .is_err()
+    {
+        println!("failed to register listener for kill event\n");
+    }
+
+    blk_backend.write().unwrap().vring_worker = Some(vring_worker);
+
+    if let Err(e) = blk_daemon.start() {
+        println!(
+            "failed to start daemon for vhost-user-blk with error: {:?}\n",
+            e
+        );
+        process::exit(1);
+    }
+
+    blk_daemon.wait().unwrap();
 }
