@@ -39,6 +39,7 @@ pub struct StorageBackendRawAsync {
     next_cookie: Wrapping<usize>,
     config: virtio_blk_config,
     vring_worker: Option<Arc<VringWorker>>,
+    num_queues: u16,
 }
 
 impl StorageBackendRawAsync {
@@ -46,6 +47,7 @@ impl StorageBackendRawAsync {
         image_path: &str,
         eventfd: RawFd,
         rdonly: bool,
+        num_queues: u16,
         flags: i32,
     ) -> Result<StorageBackendRawAsync> {
         let mut options = OpenOptions::new();
@@ -87,6 +89,7 @@ impl StorageBackendRawAsync {
             next_cookie: Wrapping(0),
             config,
             vring_worker: None,
+            num_queues,
         })
     }
 }
@@ -279,7 +282,6 @@ impl VhostUserBackend for StorageBackendRawAsync {
         }
 
         let mut config: virtio_blk_config = self.config;
-        config.num_queues = self.num_queues;
 
         let buf = unsafe {
             slice::from_raw_parts(
