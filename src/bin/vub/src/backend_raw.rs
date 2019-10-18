@@ -244,7 +244,14 @@ impl VhostUserBackend for StorageBackendRaw {
         Ok(buf.to_vec())
     }
 
-    fn set_config(&mut self, offset: u32, data: &[u8]) -> result::Result<(), io::Error> {
+    fn set_config(&mut self, offset: u32, data: &[u8]) -> VhostUserResult<()> {
+        let data_len = data.len() as u32;
+        let config_len = mem::size_of::<virtio_blk_config>() as u32;
+        if offset + data_len > config_len {
+            error!("Failed to write config space");
+            return Err(VhostUserError::InvalidParam);
+        }
+        self.config.wce = data[0];
         Ok(())
     }
 }
