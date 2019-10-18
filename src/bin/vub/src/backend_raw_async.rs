@@ -40,6 +40,7 @@ pub struct StorageBackendRawAsync {
     config: virtio_blk_config,
     vring_worker: Option<Arc<VringWorker>>,
     num_queues: u16,
+    poll_ns: u128,
 }
 
 impl StorageBackendRawAsync {
@@ -48,6 +49,7 @@ impl StorageBackendRawAsync {
         eventfd: RawFd,
         rdonly: bool,
         num_queues: u16,
+        poll_ns: u128,
         flags: i32,
     ) -> Result<StorageBackendRawAsync> {
         let mut options = OpenOptions::new();
@@ -90,6 +92,7 @@ impl StorageBackendRawAsync {
             config,
             vring_worker: None,
             num_queues,
+            poll_ns,
         })
     }
 }
@@ -156,7 +159,6 @@ impl Clone for StorageBackendRawAsync {
         }
     }
 }
-
 
 impl StorageBackend for StorageBackendRawAsync {
     fn get_sectors(&self) -> u64 {

@@ -119,6 +119,7 @@ fn main() {
             uring_efd.as_raw_fd(),
             readonly,
             queue_num,
+            poll_ns,
             libc::O_DIRECT,
         ) {
             Ok(s) => s,
@@ -128,14 +129,19 @@ fn main() {
             }
         };
     } else {
-        let storage_backend =
-            match StorageBackendRaw::new(disk_image_path, readonly, queue_num, libc::O_DIRECT) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Can't open disk image {}: {}", disk_image_path, e);
-                    exit(-1);
-                }
-            };
+        let storage_backend = match StorageBackendRaw::new(
+            disk_image_path,
+            readonly,
+            queue_num,
+            poll_ns,
+            libc::O_DIRECT,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Can't open disk image {}: {}", disk_image_path, e);
+                exit(-1);
+            }
+        };
     }
 
     let blk_backend = Arc::new(RwLock::new(storage_backend));
