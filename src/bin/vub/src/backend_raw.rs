@@ -36,10 +36,17 @@ pub struct StorageBackendRaw {
     config: virtio_blk_config,
     vring_worker: Option<Arc<VringWorker>>,
     num_queues: u16,
+    poll_ns: u128,
 }
 
 impl StorageBackendRaw {
-    pub fn new(image_path: &str, rdonly: bool, num_queues: u16, flags: i32) -> Result<StorageBackendRaw> {
+    pub fn new(
+        image_path: &str,
+        rdonly: bool,
+        num_queues: u16,
+        poll_ns: u128,
+        flags: i32,
+    ) -> Result<StorageBackendRaw> {
         let mut options = OpenOptions::new();
         options.read(true);
         if !rdonly {
@@ -75,6 +82,7 @@ impl StorageBackendRaw {
             config,
             vring_worker: None,
             num_queues,
+            poll_ns,
         })
     }
 }

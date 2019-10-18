@@ -280,19 +280,14 @@ pub struct VhostUserBlk<S: StorageBackend> {
     backend: S,
     mem: Option<GuestMemoryMmap>,
     async_requests: HashMap<usize, Request>,
-    poll_ns: u128,
 }
 
 impl<S: StorageBackend> VhostUserBlk<S> {
-    pub fn new(
-        backend: S,
-        poll_ns: u128,
-    ) -> Self {
+    pub fn new(backend: S) -> Self {
         VhostUserBlk {
             backend,
             mem: None,
             async_requests: HashMap::new(),
-            poll_ns,
         }
     }
 
@@ -416,15 +411,13 @@ impl<S: StorageBackend> VhostUserBlk<S> {
 
         self.disable_notifications();
         let mut start_time = Instant::now();
+        let poll_ns = backend.poll_ns;
         loop {
-            if self.process_completions(backend).unwrap() || self.process_queue(backend).unwrap()
-            {
+            if self.process_completions(backend).unwrap() || self.process_queue(backend).unwrap() {
                 start_time = Instant::now();
             }
 
-            if self.poll_ns == 0
-                || Instant::now().duration_since(start_time).as_nanos() > self.poll_ns
-            {
+            if poll_ns == 0 || Instant::now().duration_since(start_time).as_nanos() > poll_ns {
                 self.enable_notifications();
                 self.process_queue(backend).unwrap();
                 break;
