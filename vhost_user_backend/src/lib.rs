@@ -80,10 +80,9 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// Get virtio device configuration.
     /// A default implementation is provided as we cannot expect all backends
     /// to implement this function.
-    fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
-        Vec::new()
+    fn get_config(&self, _offset: u32, _size: u32) -> VhostUserResult<Vec<u8>> {
+        Ok(Vec::new())
     }
-
     /// Set virtio device configuration.
     /// A default implementation is provided as we cannot expect all backends
     /// to implement this function.
@@ -730,7 +729,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             return Err(VhostUserError::InvalidParam);
         }
 
-        Ok(self.backend.read().unwrap().get_config(offset, size))
+        self.backend.read().unwrap().get_config(offset, size)
     }
 
     fn set_config(
