@@ -226,9 +226,22 @@ impl VhostUserBackend for StorageBackendRaw {
         }
         Ok(false)
     }
-
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
-        Vec::new()
+        if size != mem::size_of::<virtio_blk_config>() {
+            return Err(Error::InvalidParam);
+        }
+
+        let mut config: virtio_blk_config = self.config;
+        config.num_queues = self.num_queues;
+
+        let buf = unsafe {
+            slice::from_raw_parts(
+                &config as *const virtio_blk_config as *const _,
+                mem::size_of::<virtio_blk_config>(),
+            )
+        };
+
+        buf.to_vec()
     }
 
     fn set_config(&mut self, offset: u32, data: &[u8]) -> result::Result<(), io::Error> {
