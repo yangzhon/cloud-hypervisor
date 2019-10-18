@@ -38,6 +38,7 @@ pub struct StorageBackendRawAsync {
     position: u64,
     next_cookie: Wrapping<usize>,
     config: virtio_blk_config,
+    vring_worker: Option<Arc<VringWorker>>,
 }
 
 impl StorageBackendRawAsync {
@@ -85,6 +86,7 @@ impl StorageBackendRawAsync {
             position: 0u64,
             next_cookie: Wrapping(0),
             config,
+            vring_worker: None,
         })
     }
 }
@@ -138,7 +140,6 @@ impl Write for StorageBackendRawAsync {
     }
 }
 
-/*
 impl Clone for StorageBackendRawAsync {
     fn clone(&self) -> Self {
         StorageBackendRawAsync {
@@ -148,10 +149,11 @@ impl Clone for StorageBackendRawAsync {
             position: self.position,
             last_cookie: Wrapping(0),
             config: self.config.clone(),
+            vring_worker: self.vring_worker.clone(),
         }
     }
 }
-*/
+
 
 impl StorageBackend for StorageBackendRawAsync {
     fn get_sectors(&self) -> u64 {

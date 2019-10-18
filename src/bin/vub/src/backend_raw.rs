@@ -34,6 +34,7 @@ pub struct StorageBackendRaw {
     image_id: Vec<u8>,
     position: u64,
     config: virtio_blk_config,
+    vring_worker: Option<Arc<VringWorker>>,
 }
 
 impl StorageBackendRaw {
@@ -71,6 +72,7 @@ impl StorageBackendRaw {
             image_id,
             position: 0u64,
             config,
+            vring_worker: None,
         })
     }
 }
@@ -113,6 +115,7 @@ impl Clone for StorageBackendRaw {
             image_id: self.image_id.clone(),
             position: self.position,
             config: self.config.clone(),
+            vring_worker: self.vring_worker.clone(),
         }
     }
 }
