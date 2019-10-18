@@ -118,6 +118,7 @@ fn main() {
             disk_image_path,
             uring_efd.as_raw_fd(),
             readonly,
+            queue_num,
             libc::O_DIRECT,
         ) {
             Ok(s) => s,
@@ -128,7 +129,7 @@ fn main() {
         };
     } else {
         let storage_backend =
-            match StorageBackendRaw::new(disk_image_path, readonly, libc::O_DIRECT) {
+            match StorageBackendRaw::new(disk_image_path, readonly, queue_num, libc::O_DIRECT) {
                 Ok(s) => s,
                 Err(e) => {
                     error!("Can't open disk image {}: {}", disk_image_path, e);
