@@ -11,12 +11,21 @@ use std::num::Wrapping;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::{Arc, RwLock};
+use vhost_user_backend::{VhostUserBackend, Vring, VringWorker};
 
-use vhost_user_backend::VhostUserBackend;
-
+use super::*;
 use crate::backend::StorageBackend;
 use io_uring::UringQueue;
-use virtio_bindings::bindings::virtio_blk::{virtio_blk_config, VIRTIO_BLK_ID_BYTES};
+use log::error;
+use std::mem;
+use std::slice;
+use vhost_rs::vhost_user::message::*;
+use vhost_rs::vhost_user::{Error as VhostUserError, Result as VhostUserResult};
+use virtio_bindings::bindings::virtio_blk::*;
+use vm_memory::GuestMemoryMmap;
+
+pub type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 pub fn build_device_id(image: &File) -> Result<String> {
     let blk_metadata = image.metadata()?;
@@ -149,13 +158,15 @@ impl Write for StorageBackendRawAsync {
 impl Clone for StorageBackendRawAsync {
     fn clone(&self) -> Self {
         StorageBackendRawAsync {
-            queue: None,
+            queue: self.queue.clone(),
             image: self.image.try_clone().unwrap(),
             image_id: self.image_id.clone(),
-            position: self.position,
-            last_cookie: Wrapping(0),
+            position: self.position(),
+            next_cookie: self.next_cookie.clone(),
             config: self.config.clone(),
             vring_worker: self.vring_worker.clone(),
+            num_queues: self.num_queues.clone(),
+            poll_ns: self.poll_ns.clone(),
         }
     }
 }

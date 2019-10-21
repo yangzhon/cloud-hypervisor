@@ -11,10 +11,20 @@ use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 
+use super::*;
 use crate::backend::StorageBackend;
+use log::error;
 use nix::sys::uio;
-use vhost_user_backend::VhostUserBackend;
-use virtio_bindings::bindings::virtio_blk::{virtio_blk_config, VIRTIO_BLK_ID_BYTES};
+use std::mem;
+use std::slice;
+use std::sync::{Arc, RwLock};
+use vhost_rs::vhost_user::message::*;
+use vhost_rs::vhost_user::{Error as VhostUserError, Result as VhostUserResult};
+use vhost_user_backend::{VhostUserBackend, Vring, VringWorker};
+use virtio_bindings::bindings::virtio_blk::*;
+use vm_memory::GuestMemoryMmap;
+
+pub type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 pub fn build_device_id(image: &File) -> Result<String> {
     let blk_metadata = image.metadata()?;

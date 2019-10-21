@@ -7,26 +7,20 @@
 // Portions Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
-use std::fs::File;
-use std::io;
-use std::mem;
-use std::os::unix::io::{FromRawFd, RawFd};
-use std::result;
-use std::slice;
-use std::sync::{Arc, Mutex};
-
 use super::backend::StorageBackend;
 use bitflags::bitflags;
 use log::{debug, error};
+use std::collections::HashMap;
+use std::io;
+use std::result;
+use std::time::Instant;
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{
     Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion,
-    GuestRegionMmap, MmapRegion,
 };
+use vm_virtio::DescriptorChain;
 
-use vhost_rs::message::*;
-use vhost_rs::{Error, Result, VhostUserSlave};
+use vhost_rs::vhost_user::{Error, Result};
 
 bitflags! {
     pub struct VhostUserBlkFeatures: u64 {
@@ -126,7 +120,7 @@ impl Request {
     ) -> result::Result<Request, Error> {
         if avail_desc.is_write_only() {
             error!("unexpected write only descriptor");
-            return Err(Error::OperationFailedInSlave);
+            return Err(Error::SlaveInternalError);
         }
 
         let mut req = Request {
@@ -147,7 +141,7 @@ impl Request {
             // Only flush requests are allowed to skip the data descriptor.
             if req.request_type != RequestType::Flush {
                 error!("request without data descriptor!");
-                return Err(Error::OperationFailedInSlave);
+                return Err(Error::SlaveInternalError);
             }
         } else {
             data_desc = desc;
@@ -155,15 +149,15 @@ impl Request {
 
             if data_desc.is_write_only() && req.request_type == RequestType::Out {
                 error!("unexpected write only descriptor");
-                return Err(Error::OperationFailedInSlave);
+                return Err(Error::SlaveInternalError);
             }
             if !data_desc.is_write_only() && req.request_type == RequestType::In {
                 error!("unexpected read only descriptor");
-                return Err(Error::OperationFailedInSlave);
+                return Err(Error::SlaveInternalError);
             }
             if !data_desc.is_write_only() && req.request_type == RequestType::GetDeviceID {
                 error!("unexpected read only descriptor");
-                return Err(Error::OperationFailedInSlave);
+                return Err(Error::SlaveInternalError);
             }
 
             req.data_addr = data_desc.addr;
@@ -173,12 +167,12 @@ impl Request {
         // The status MUST always be writable.
         if !status_desc.is_write_only() {
             error!("unexpected read only descriptor");
-            return Err(Error::OperationFailedInSlave);
+            return Err(Error::SlaveInternalError);
         }
 
         if status_desc.len < 1 {
             error!("descriptor length is too small");
-            return Err(Error::OperationFailedInSlave);
+            return Err(Error::SlaveInternalError);
         }
 
         req.status_addr = status_desc.addr;
@@ -291,10 +285,7 @@ impl<S: StorageBackend> VhostUserBlk<S> {
         }
     }
 
-    fn process_completions<S>(&mut self, backend: &mut S) -> Result<bool>
-    where
-        S: StorageBackend,
-    {
+    fn process_completions(&mut self, backend: &mut S) -> Result<bool> {
         let mut count = 0;
 
         while !self.async_requests.is_empty() {
@@ -326,7 +317,7 @@ impl<S: StorageBackend> VhostUserBlk<S> {
         Ok(count != 0)
     }
 
-    fn process_queue<S: StorageBackend>(&mut self, backend: &mut S) -> Result<bool> {
+    fn process_queue(&mut self, backend: &mut S) -> Result<bool> {
         let mut used_desc_heads = [(0, 0); 1024 as usize];
         let mut used_count = 0;
         for avail_desc in self.queue.iter(&self.mem) {
@@ -406,7 +397,7 @@ impl<S: StorageBackend> VhostUserBlk<S> {
         }
     }
 
-    pub fn poll_queues<S: StorageBackend>(&mut self, backend: &mut S) {
+    pub fn poll_queues(&mut self, backend: &mut S) {
         let mut vring = self.vring.lock().unwrap();
 
         self.disable_notifications();
