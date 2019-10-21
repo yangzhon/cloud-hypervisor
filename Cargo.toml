@@ -13,6 +13,7 @@ log = { version = "0.4.8", features = ["std"] }
 net_gen = { path = "net_gen" }
 net_util = { path = "net_util" }
 vhost_user_backend = { path = "vhost_user_backend"}
+vub = { path = "./src/bin/vub"}
 virtio-bindings = "0.1.0"
 vmm = { path = "vmm" }
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }

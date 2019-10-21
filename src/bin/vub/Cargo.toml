@@ -9,8 +9,18 @@ license = "Apache-2.0"
 [dependencies]
 bitflags = ">=1.0.1"
 env_logger = "0.5.12"
-epoll = ">=4.0.1"
 io-uring = "0.2"
-libc = ">=0.2.39"
-log = "0.4.6"
 nix = ">=0.12"
+clap = "2.33.0"
+epoll = "4.1.0"
+libc = "0.2.62"
+log = { version = "0.4.8", features = ["std"] }
+virtio-bindings = "0.1.0"
+vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
+vmm-sys-util = "0.1.1"
+vm-virtio = { path = "./../../../vm-virtio" }
+vhost_user_backend = { path = "./../../../vhost_user_backend"}
+
+[dependencies.vhost_rs]
+path = "./../../../vhost_rs"
+features = ["vhost-user-slave"]
