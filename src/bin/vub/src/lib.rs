@@ -5,7 +5,7 @@ extern crate vhost_user_backend;
 
 pub mod backend;
 pub mod backend_raw;
-pub mod backend_raw_async;
+//pub mod backend_raw_async;
 pub mod block;
 
 const QUEUE_SIZE: u16 = 256;
