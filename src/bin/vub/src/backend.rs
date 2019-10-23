@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::io::{Read, Result, Seek, Write};
-
-use vhost_user_backend::VhostUserBackend;
+use vhost_user_backend::{VhostUserBackend, Vring};
+use vm_memory::GuestMemoryMmap;
 
 pub trait StorageBackend: Read + Seek + Write + VhostUserBackend {
     fn get_sectors(&self) -> u64;
@@ -19,4 +19,8 @@ pub trait StorageBackend: Read + Seek + Write + VhostUserBackend {
     fn check_sector_offset(&self, sector: u64, len: u64) -> Result<()>;
 
     fn seek_sector(&mut self, sector: u64) -> Result<u64>;
+
+    fn poll_queues(&mut self, vring: &mut Vring);
+
+    fn get_mem(&self) -> Option<GuestMemoryMmap>;
 }

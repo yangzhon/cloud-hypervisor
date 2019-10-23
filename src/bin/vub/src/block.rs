@@ -10,10 +10,8 @@
 use super::backend::StorageBackend;
 use bitflags::bitflags;
 use log::{debug, error};
-use std::collections::HashMap;
 use std::io;
 use std::result;
-use std::time::Instant;
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{
     Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion,
@@ -21,6 +19,7 @@ use vm_memory::{
 use vm_virtio::DescriptorChain;
 
 use vhost_rs::vhost_user::{Error, Result};
+use vhost_user_backend::Vring;
 
 bitflags! {
     pub struct VhostUserBlkFeatures: u64 {
@@ -269,150 +268,110 @@ impl Request {
         }
     }
 }
+/*
+pub fn process_completions<T: StorageBackend>(backend: &mut T) -> Result<bool> {
+    let mut count = 0;
 
-pub struct VhostUserBlk<S: StorageBackend> {
-    backend: S,
-    mem: Option<GuestMemoryMmap>,
-    async_requests: HashMap<usize, Request>,
+    while !self.async_requests.is_empty() {
+        if let Some(cookie) = backend
+            .get_completion(false)
+            .map_err(|_err| Error::OperationFailedInSlave)?
+        {
+            let request = self.async_requests.remove(&cookie).unwrap();
+
+            debug!(
+                "got completion with cookie: {}, desc={}",
+                cookie, request.desc_index
+            );
+
+            let (region, addr) = self.mem.to_region_addr(request.status_addr).unwrap();
+            region.write_obj(VIRTIO_BLK_S_OK, addr).unwrap();
+
+            let used_idx = self
+                .queue
+                .add_used(&self.mem, request.desc_index, request.data_len);
+
+            count += 1;
+        } else {
+            // No completions avaiable, don't waste more time looking for them.
+            break;
+        }
+    }
+
+    Ok(count != 0)
 }
-
-impl<S: StorageBackend> VhostUserBlk<S> {
-    pub fn new(backend: S) -> Self {
-        VhostUserBlk {
-            backend,
-            mem: None,
-            async_requests: HashMap::new(),
-        }
-    }
-
-    fn process_completions(&mut self, backend: &mut S) -> Result<bool> {
-        let mut count = 0;
-
-        while !self.async_requests.is_empty() {
-            if let Some(cookie) = backend
-                .get_completion(false)
-                .map_err(|_err| Error::OperationFailedInSlave)?
-            {
-                let request = self.async_requests.remove(&cookie).unwrap();
-
-                debug!(
-                    "got completion with cookie: {}, desc={}",
-                    cookie, request.desc_index
-                );
-
-                let (region, addr) = self.mem.to_region_addr(request.status_addr).unwrap();
-                region.write_obj(VIRTIO_BLK_S_OK, addr).unwrap();
-
-                let used_idx = self
-                    .queue
-                    .add_used(&self.mem, request.desc_index, request.data_len);
-
-                count += 1;
-            } else {
-                // No completions avaiable, don't waste more time looking for them.
-                break;
-            }
-        }
-
-        Ok(count != 0)
-    }
-
-    fn process_queue(&mut self, backend: &mut S) -> Result<bool> {
-        let mut used_desc_heads = [(0, 0); 1024 as usize];
-        let mut used_count = 0;
-        for avail_desc in self.queue.iter(&self.mem) {
-            debug!("got an element in the queue");
-            match Request::parse(&avail_desc, &self.mem) {
-                Ok(request) => {
-                    debug!("element is a valid request");
-                    let mut len = 0;
-                    match request.execute(backend, &self.mem) {
-                        Ok(type_) => match type_ {
-                            ExecuteType::Sync(l) => {
-                                debug!("executing synchronously: desc={}", request.desc_index);
-                                len = l;
-                                let (region, addr) =
-                                    self.mem.to_region_addr(request.status_addr).unwrap();
-                                region.write_obj(VIRTIO_BLK_S_OK, addr).unwrap();
-                            }
-                            ExecuteType::Async(cookie) => {
-                                debug!("executing asynchronously: desc={}", request.desc_index);
-                                self.async_requests.insert(cookie, request);
-                            }
-                        },
-                        Err(err) => {
-                            error!("failed to execute request: {:?}", err);
-                            len = 1; // We need at least 1 byte for the status.
-                            let (region, addr) =
-                                self.mem.to_region_addr(request.status_addr).unwrap();
-                            region.write_obj(err.status(), addr).unwrap();
+*/
+pub fn process_queue<T: StorageBackend>(backend: &mut T, vring: &mut Vring) -> Result<bool> {
+    let mut used_desc_heads = [(0, 0); 1024 as usize];
+    let mut used_count = 0;
+    let mem = backend.get_mem().unwrap();
+    while let Some(avail_desc) = vring.mut_queue().iter(&mem).next() {
+        debug!("got an element in the queue");
+        match Request::parse(&avail_desc, &mem) {
+            Ok(request) => {
+                debug!("element is a valid request");
+                let mut len = 0;
+                match request.execute(backend, &mem) {
+                    Ok(type_) => match type_ {
+                        ExecuteType::Sync(l) => {
+                            debug!("executing synchronously: desc={}", request.desc_index);
+                            len = l;
+                            let (region, addr) = mem.to_region_addr(request.status_addr).unwrap();
+                            region.write_obj(VIRTIO_BLK_S_OK, addr).unwrap();
                         }
-                    };
-                    if len != 0 {
-                        used_desc_heads[used_count] = (avail_desc.index, len);
-                        used_count += 1;
+                        ExecuteType::Async(cookie) => {
+                            debug!("executing asynchronously: desc={}", request.desc_index);
+                            //backend.async_requests.insert(cookie, request);
+                        }
+                    },
+                    Err(err) => {
+                        error!("failed to execute request: {:?}", err);
+                        len = 1; // We need at least 1 byte for the status.
+                        let (region, addr) = mem.to_region_addr(request.status_addr).unwrap();
+                        region.write_obj(err.status(), addr).unwrap();
                     }
-                }
-                Err(err) => {
-                    error!("failed to parse available descriptor chain: {:?}", err);
-                    used_desc_heads[used_count] = (avail_desc.index, 0);
+                };
+                if len != 0 {
+                    used_desc_heads[used_count] = (avail_desc.index, len);
                     used_count += 1;
                 }
             }
-        }
-
-        for &(desc_index, len) in &used_desc_heads[..used_count] {
-            let used_idx = self.queue.add_used(&self.mem, desc_index, len as u32);
-            if self.should_signal_guest(used_idx) {
-                self.signal_guest().unwrap();
-            } else {
-                debug!("omitting guest signal");
+            Err(err) => {
+                error!("failed to parse available descriptor chain: {:?}", err);
+                used_desc_heads[used_count] = (avail_desc.index, 0);
+                used_count += 1;
             }
-        }
-
-        if backend.is_async() {
-            backend.submit_requests().unwrap();
-        }
-
-        Ok(used_count > 0)
-    }
-
-    fn disable_notifications(&self) {
-        if self.features & VhostUserBlkFeatures::EVENT_IDX.bits() != 0 {
-            self.queue
-                .set_avail_event(&self.mem, self.queue.get_last_avail());
-        } else {
-            // TODO
-            //self.queue.set_used_flags_bit(VRING_USED_F_NO_NOTIFY);
         }
     }
 
-    fn enable_notifications(&self) {
-        if self.features & VhostUserBlkFeatures::EVENT_IDX.bits() != 0 {
-            self.queue
-                .set_avail_event(&self.mem, self.queue.get_last_avail());
-        } else {
-            // TODO
-            //self.queue.unset_used_flags_bit(VRING_USED_F_NO_NOTIFY);
-        }
+    for &(desc_index, len) in &used_desc_heads[..used_count] {
+        vring.mut_queue().add_used(&mem, desc_index, len as u32);
     }
 
-    pub fn poll_queues(&mut self, backend: &mut S) {
-        let mut vring = self.vring.lock().unwrap();
+    if backend.is_async() {
+        backend.submit_requests().unwrap();
+    }
 
-        self.disable_notifications();
-        let mut start_time = Instant::now();
-        let poll_ns = backend.poll_ns;
-        loop {
-            if self.process_completions(backend).unwrap() || self.process_queue(backend).unwrap() {
-                start_time = Instant::now();
-            }
-
-            if poll_ns == 0 || Instant::now().duration_since(start_time).as_nanos() > poll_ns {
-                self.enable_notifications();
-                self.process_queue(backend).unwrap();
-                break;
-            }
-        }
+    Ok(used_count > 0)
+}
+/*
+pub fn disable_notifications<T: StorageBackend>(backend: &mut T, vring: &mut Vring)  {
+    if backend.features() & VhostUserBlkFeatures::EVENT_IDX.bits() != 0 {
+        vring.mut_queue()
+             .set_avail_event(&self.mem, vring.mut_queue().get_last_avail());
+    } else {
+        // TODO
+        //self.queue.set_used_flags_bit(VRING_USED_F_NO_NOTIFY);
     }
 }
+
+pub fn enable_notifications<T: StorageBackend>(backend: &mut T, vring: &mut Vring) {
+    if backend.features() & VhostUserBlkFeatures::EVENT_IDX.bits() != 0 {
+        vring.mut_queue()
+             .set_avail_event(&self.mem, vring.mut_queue().get_last_avail());
+    } else {
+        // TODO
+        //self.queue.unset_used_flags_bit(VRING_USED_F_NO_NOTIFY);
+    }
+}
+*/

@@ -11,20 +11,30 @@ use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 
+use super::block::*;
 use super::*;
 use crate::backend::StorageBackend;
+use libc::{self, EFD_NONBLOCK};
 use log::error;
 use nix::sys::uio;
 use std::mem;
 use std::slice;
+//use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 use vhost_rs::vhost_user::message::*;
 use vhost_rs::vhost_user::{Error as VhostUserError, Result as VhostUserResult};
 use vhost_user_backend::{VhostUserBackend, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::GuestMemoryMmap;
+use vmm_sys_util::eventfd::EventFd;
 
 pub type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
+
+// New descriptors are pending on the virtio queue.
+const QUEUE_AVAIL_EVENT: u16 = 0;
+// The device has been dropped.
+pub const KILL_EVENT: u16 = 1;
 
 pub fn build_device_id(image: &File) -> Result<String> {
     let blk_metadata = image.metadata()?;
@@ -42,11 +52,13 @@ pub fn build_device_id(image: &File) -> Result<String> {
 pub struct StorageBackendRaw {
     image: File,
     image_id: Vec<u8>,
+    mem: Option<GuestMemoryMmap>,
     position: u64,
     config: virtio_blk_config,
     vring_worker: Option<Arc<VringWorker>>,
     num_queues: u16,
     poll_ns: u128,
+    kill_evt: EventFd,
 }
 
 impl StorageBackendRaw {
@@ -88,11 +100,13 @@ impl StorageBackendRaw {
         Ok(StorageBackendRaw {
             image,
             image_id,
+            mem: None,
             position: 0u64,
             config,
             vring_worker: None,
             num_queues,
             poll_ns,
+            kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
         })
     }
 }
@@ -133,9 +147,13 @@ impl Clone for StorageBackendRaw {
         StorageBackendRaw {
             image: self.image.try_clone().unwrap(),
             image_id: self.image_id.clone(),
+            mem: self.mem.clone(),
             position: self.position,
             config: self.config.clone(),
             vring_worker: self.vring_worker.clone(),
+            num_queues: self.num_queues.clone(),
+            poll_ns: self.poll_ns.clone(),
+            kill_evt: self.kill_evt.try_clone().unwrap(),
         }
     }
 }
@@ -188,6 +206,27 @@ impl StorageBackend for StorageBackendRaw {
 
         self.seek(SeekFrom::Start(sector << SECTOR_SHIFT))
     }
+
+    fn poll_queues(&mut self, vring: &mut Vring) {
+        //disable_notifications(self, vring);
+        let mut start_time = Instant::now();
+        let poll_ns = self.poll_ns;
+        loop {
+            if process_queue(self, vring).unwrap() {
+                start_time = Instant::now();
+            }
+
+            if poll_ns == 0 || Instant::now().duration_since(start_time).as_nanos() > poll_ns {
+                //enable_notifications(self, vring);
+                process_queue(self, vring).unwrap();
+                break;
+            }
+        }
+    }
+
+    fn get_mem(&self) -> Option<GuestMemoryMmap> {
+        self.mem.clone()
+    }
 }
 
 impl VhostUserBackend for StorageBackendRaw {
@@ -200,7 +239,7 @@ impl VhostUserBackend for StorageBackendRaw {
     }
 
     fn features(&self) -> u64 {
-        let mut avail_features = 1 << VIRTIO_BLK_F_FLUSH
+        let avail_features = 1 << VIRTIO_BLK_F_FLUSH
             | 1 << VIRTIO_BLK_F_SIZE_MAX
             | 1 << VIRTIO_BLK_F_SEG_MAX
             | 1 << VIRTIO_BLK_F_TOPOLOGY
@@ -229,10 +268,9 @@ impl VhostUserBackend for StorageBackendRaw {
         match device_event {
             QUEUE_AVAIL_EVENT => {
                 let mut vring = vrings[0].write().unwrap();
-                if self.poll_queue(&mut vring) {
-                    if let Err(e) = vring.signal_used_queue() {
-                        error!("Failed to signal used queue: {:?}", e);
-                    }
+                self.poll_queues(&mut vring);
+                if let Err(e) = vring.signal_used_queue() {
+                    error!("Failed to signal used queue: {:?}", e);
                 }
             }
             KILL_EVENT => {
