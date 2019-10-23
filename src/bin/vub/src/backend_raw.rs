@@ -284,12 +284,12 @@ impl VhostUserBackend for StorageBackendRaw {
         }
         Ok(false)
     }
-    fn get_config(&self, offset: u32, size: u32) -> VhostUserResult<Vec<u8>> {
+    fn get_config(&self, _offset: u32, size: u32) -> VhostUserResult<Vec<u8>> {
         if size != mem::size_of::<virtio_blk_config>() as u32 {
             return Err(VhostUserError::InvalidParam);
         }
 
-        let mut config: virtio_blk_config = self.config;
+        let config: virtio_blk_config = self.config;
 
         let buf = unsafe {
             slice::from_raw_parts(
