@@ -3,22 +3,18 @@
 extern crate vhost_user_backend;
 extern crate vub;
 
-use std::collections::HashMap;
-use std::mem;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::process::exit;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Instant;
+use std::os::unix::io::AsRawFd;
+use std::process;
+use std::sync::{Arc, RwLock};
 
 use clap::{crate_authors, crate_version, App, Arg};
-use log::{debug, error, info};
-use vhost_rs::SlaveListener;
-use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
-use vub::backend::StorageBackend;
+//use log::error;
+use vhost_user_backend::VhostUserDaemon;
 use vub::backend_raw::StorageBackendRaw;
-use vub::backend_raw_async::StorageBackendRawAsync;
-use vub::block::VhostUserBlk;
+//use vub::backend_raw_async::StorageBackendRawAsync;
+
+// The device has been dropped.
+pub const KILL_EVENT: u16 = 1;
 
 fn main() {
     env_logger::init();
@@ -85,13 +81,13 @@ fn main() {
         readonly = false;
     }
 
-    let async_backend;
-    if cmd_args.is_present("async_backend") {
-        async_backend = true;
-    } else {
-        async_backend = false;
-    }
-
+    /*    let async_backend;
+        if cmd_args.is_present("async_backend") {
+            async_backend = true;
+        } else {
+            async_backend = false;
+        }
+    */
     let poll_ns;
     if cmd_args.is_present("poll_ns") {
         let poll_ns_str = cmd_args.value_of("poll_ns").expect("Invalid poll_ns value");
@@ -111,40 +107,52 @@ fn main() {
     } else {
         queue_num = 1;
     }
+    /*
+        let storage_backend;
+        if async_backend {
+            let uring_efd = EventFd::new().expect("Can't create uring efd");
+            storage_backend = match StorageBackendRawAsync::new(
+                disk_image_path,
+                uring_efd.as_raw_fd(),
+                readonly,
+                queue_num,
+                poll_ns,
+                libc::O_DIRECT,
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Can't open disk image {}: {}", disk_image_path, e);
+                    exit(-1);
+                }
+            };
+        } else {
+            storage_backend = match StorageBackendRaw::new(
+                disk_image_path,
+                readonly,
+                queue_num,
+                poll_ns,
+                libc::O_DIRECT,
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Can't open disk image {}: {}", disk_image_path, e);
+                    process::exit(-1);
+                }
+            };
+        }
 
-    if async_backend {
-        let uring_efd = EventFd::new().expect("Can't create uring efd");
-        let storage_backend = match StorageBackendRawAsync::new(
+        let blk_backend = Arc::new(RwLock::new(storage_backend));
+    */
+    let blk_backend = Arc::new(RwLock::new(
+        StorageBackendRaw::new(
             disk_image_path,
-            uring_efd.as_raw_fd(),
             readonly,
             queue_num,
             poll_ns,
             libc::O_DIRECT,
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Can't open disk image {}: {}", disk_image_path, e);
-                exit(-1);
-            }
-        };
-    } else {
-        let storage_backend = match StorageBackendRaw::new(
-            disk_image_path,
-            readonly,
-            queue_num,
-            poll_ns,
-            libc::O_DIRECT,
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Can't open disk image {}: {}", disk_image_path, e);
-                exit(-1);
-            }
-        };
-    }
-
-    let blk_backend = Arc::new(RwLock::new(storage_backend));
+        )
+        .unwrap(),
+    ));
     println!("blk_backend is created!\n");
 
     let name = "vhost-user-blk-backend";

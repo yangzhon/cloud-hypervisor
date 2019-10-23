@@ -55,10 +55,10 @@ pub struct StorageBackendRaw {
     mem: Option<GuestMemoryMmap>,
     position: u64,
     config: virtio_blk_config,
-    vring_worker: Option<Arc<VringWorker>>,
+    pub vring_worker: Option<Arc<VringWorker>>,
     num_queues: u16,
     poll_ns: u128,
-    kill_evt: EventFd,
+    pub kill_evt: EventFd,
 }
 
 impl StorageBackendRaw {
